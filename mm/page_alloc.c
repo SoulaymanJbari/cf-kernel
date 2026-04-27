@@ -3440,9 +3440,11 @@ void free_unref_page(struct page *page)
 	unsigned long flags;
 	unsigned long pfn = page_to_pfn(page);
 	int migratetype;
-	bool freed_pcp = false;
-#ifdef CONFIG_ADD_ZONE
 	struct zone *zone;
+	bool freed_pcp = false;
+	if (!free_unref_page_prepare(page, pfn))
+		return;
+#ifdef CONFIG_ADD_ZONE
 	zone = page_zone(page);
 	if (strcmp(zone->name, "Custom") != 0)
 		goto origin;
@@ -3450,8 +3452,6 @@ void free_unref_page(struct page *page)
 	return;
 origin:
 #endif
-	if (!free_unref_page_prepare(page, pfn))
-		return;
 
 	/*
 	 * We only track unmovable, reclaimable, movable and cma on pcp lists.
@@ -9615,3 +9615,87 @@ bool has_managed_dma(void)
 	return false;
 }
 #endif /* CONFIG_ZONE_DMA */
+
+#ifdef CONFIG_ADD_ZONE
+
+static struct page *alloc_same_subarray(struct page *old_page, 
+									unsigned long subarray_idx)
+{
+	struct page *page;
+	struct zone *custom_zone;
+	struct subarray *sa;
+	unsigned long idx;
+	unsigned long flags;
+	custom_zone = &NODE_DATA(0)->node_zones[ZONE_CUSTOM];
+	sa = &custom_zone->subarrays[subarray_idx];
+	spin_lock_irqsave(&sa->lock, flags);
+	if (sa->count > 0) {
+		idx = find_first_bit(sa->bitmap, SUBARRAY_PAGES);
+		if (idx < SUBARRAY_PAGES) {
+			__clear_bit(idx, sa->bitmap);
+			page = pfn_to_page(sa->start_pfn + idx);
+			sa->count--;
+			spin_unlock_irqrestore(&sa->lock, flags);
+			__mod_zone_page_state(custom_zone, NR_FREE_PAGES, -1);
+			ClearPageReserved(page);
+			post_alloc_hook(page, 0, GFP_HIGHUSER_MOVABLE);
+			return page;
+		}
+	}
+	spin_unlock_irqrestore(&sa->lock, flags);
+	printk(KERN_WARNING "[yb] subarray full cannot migrate!\n");
+	return NULL;
+}
+
+int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
+{
+	int ret = 0;
+	struct list_head list;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	struct page *page;
+	phys_addr_t user_paddr;
+	int subarray_idx = get_subarray_idx(cache_page);
+	if (subarray_idx < 0) {
+		printk(KERN_WARNING "[yb] page cache page not in custom zone!\n");
+		return -EINVAL;
+	}
+	mmap_read_lock(mm);
+	vma = find_vma(mm, untagged_addr(user_vaddr));
+	if (!vma || user_vaddr < vma->vm_start) {
+		mmap_read_unlock(mm);
+		printk(KERN_WARNING "[yb] Could not find VMA!\n");
+		return -EINVAL;
+	}
+	page = follow_page(vma, user_vaddr, 0);
+	mmap_read_unlock(mm);
+	if (!page || IS_ERR(page)) {
+		printk(KERN_WARNING "[yb] Could not follow page!\n");
+		return -EINVAL;
+	}
+	if (subarray_idx == get_subarray_idx(page)) {
+		return 0;
+	}
+	user_paddr = page_to_phys(page);
+	printk(KERN_INFO "[add_zone]before remap: N=%s, u:%p\n", current->comm, &user_paddr);
+	ret = isolate_lru_page(page);
+	if (ret) {
+		lru_add_drain();
+		ret = isolate_lru_page(page);
+		if (ret) {
+			printk(KERN_WARNING "[yb] Failed to isolate lru page!\n");
+			return ret;
+		}
+	}
+	INIT_LIST_HEAD(&list);
+	list_add_tail(&page->lru, &list);
+
+	ret = migrate_pages(&list, alloc_same_subarray, NULL,
+		(unsigned long)subarray_idx, MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
+	if (ret) {
+		printk(KERN_WARNING "[yb] Failed to migrate page!\n");
+		putback_movable_pages(&list);
+	}
+	return ret;
+}
+#endif

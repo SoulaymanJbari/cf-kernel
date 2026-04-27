@@ -2351,8 +2351,53 @@ page_ok:
 		 * Ok, we have the page, and it's up-to-date, so
 		 * now we can copy it to user space...
 		 */
+		if (current->cred->uid.val >= 10000) {
+			phys_addr_t kernel_phys_addr;
+			phys_addr_t user_phys_addr;
+			uintptr_t user_virt_addr;
+			int subarray_idx;
+			int res = 0;
+			unsigned long to_copy = nr;
+			int npages = 0;
+			struct page **user_page;
+			user_virt_addr = (uintptr_t)iter->iov->iov_base + iter->iov_offset;
+			user_page = kvcalloc(1, sizeof(void *), GFP_KERNEL);
+			kernel_phys_addr = page_to_phys(page) + offset;
+			if (iter->count < nr) {
+				to_copy = iter->count;
+			}
+			to_copy = min(to_copy, iter->iov->iov_len - iter->iov_offset);
+			if (to_copy == 4096 && ((user_virt_addr) & (~PAGE_MASK)) == 0) {
+				if ((res = remap_user_page(user_virt_addr, page))) {
+					printk(KERN_INFO "[yb] could not remap user page: %d!\n", -res);
+				} else {
+					printk(KERN_INFO "[yb] remap successful!\n");
+				}
+			}
 
-		ret = copy_page_to_iter(page, offset, nr, iter);
+			ret = copy_page_to_iter(page, offset, nr, iter);
+			npages = get_user_pages_fast(user_virt_addr, 1, 0, user_page);
+
+			if (npages > 0) {
+				subarray_idx = get_subarray_idx(page);
+				if (subarray_idx >=0 && subarray_idx == get_subarray_idx(user_page[0])) {
+					printk(KERN_EMERG "[yb] read same subarray!\n");
+				}
+				user_phys_addr = page_to_phys(user_page[0]);
+				printk(KERN_EMERG 
+					"[test_mobile] N=%s,r,%d,%lld,0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
+					current->comm, current->cpu, ret,
+					page_to_virt(page), kernel_phys_addr,
+					user_virt_addr,
+					user_phys_addr + (user_virt_addr & ~PAGE_MASK));
+				put_page(user_page[0]);
+			} else {
+				printk(KERN_EMERG "[yb] Failed to get user page!\n");
+			}
+			kvfree(user_page);
+		} else {
+			ret = copy_page_to_iter(page, offset, nr, iter);
+		}
 		offset += ret;
 		index += offset >> PAGE_SHIFT;
 		offset &= ~PAGE_MASK;
