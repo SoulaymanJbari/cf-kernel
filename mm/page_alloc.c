@@ -72,6 +72,8 @@
 #include <linux/padata.h>
 #include <linux/khugepaged.h>
 #include <trace/hooks/mm.h>
+#include <linux/rmap.h>
+#include <linux/prandom.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -79,7 +81,16 @@
 #include "internal.h"
 #include "shuffle.h"
 #include "page_reporting.h"
+#ifdef CONFIG_ADD_ZONE
+#include <asm/pgtable.h>
+#define PAGE_PROT_BITS (PTE_VALID | PTE_WRITE | PTE_USER | PTE_PXN | PTE_UXN)
+extern unsigned long custom_zone_start_pfn;
 
+bool is_uid_allowed(int uid)
+{
+	return uid >= 10000;
+}
+#endif
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
 
@@ -303,6 +314,9 @@ int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES] = {
 	[ZONE_DMA32] = 256,
 #endif
 	[ZONE_NORMAL] = 32,
+#ifdef CONFIG_ADD_ZONE
+	[ZONE_CUSTOM] = 0,
+#endif
 #ifdef CONFIG_HIGHMEM
 	[ZONE_HIGHMEM] = 0,
 #endif
@@ -317,6 +331,9 @@ static char * const zone_names[MAX_NR_ZONES] = {
 	 "DMA32",
 #endif
 	 "Normal",
+#ifdef CONFIG_ADD_ZONE
+	 "Custom",
+#endif
 #ifdef CONFIG_HIGHMEM
 	 "HighMem",
 #endif
@@ -1015,6 +1032,36 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 	       page_is_buddy(higher_page, higher_buddy, order + 1);
 }
 
+#ifdef CONFIG_ADD_ZONE
+int get_subarray_idx(struct page *page)
+{
+	struct zone *zone = page_zone(page);
+	if (zone_idx(zone) != ZONE_CUSTOM)
+		return -1;
+	return page_to_pfn(page) / 512 - (zone->zone_start_pfn / 512);
+}
+
+void free_custom_page(struct page *page) 
+{
+	unsigned long pfn = page_to_pfn(page);
+	unsigned long flags;
+	struct zone *zone = page_zone(page);
+	struct subarray *sa;
+	int subarray_idx;
+	unsigned long idx;
+	subarray_idx = get_subarray_idx(page);
+	sa = &zone->subarrays[subarray_idx];
+	idx = pfn & 511;
+	spin_lock_irqsave(&sa->lock, flags);
+	__set_bit(idx, sa->bitmap);
+	sa->count++;
+	spin_unlock_irqrestore(&sa->lock, flags);
+	SetPageReserved(page);
+	__mod_zone_page_state(zone, NR_FREE_PAGES, 1);
+	return;
+}
+#endif
+
 /*
  * Freeing function for a buddy system allocator.
  *
@@ -1050,6 +1097,13 @@ static inline void __free_one_page(struct page *page,
 	unsigned int max_order;
 	struct page *buddy;
 	bool to_tail;
+	int i;
+	if (zone_idx(zone) == ZONE_CUSTOM) {
+		for (i = 0; i < (1 << order); ++i) {
+			free_custom_page(page + i);
+		}
+		return;
+	}
 
 	max_order = min_t(unsigned int, MAX_ORDER - 1, pageblock_order);
 
@@ -3387,7 +3441,15 @@ void free_unref_page(struct page *page)
 	unsigned long pfn = page_to_pfn(page);
 	int migratetype;
 	bool freed_pcp = false;
-
+#ifdef CONFIG_ADD_ZONE
+	struct zone *zone;
+	zone = page_zone(page);
+	if (strcmp(zone->name, "Custom") != 0)
+		goto origin;
+	free_custom_page(page);
+	return;
+origin:
+#endif
 	if (!free_unref_page_prepare(page, pfn))
 		return;
 
@@ -3440,10 +3502,20 @@ void free_unref_page_list(struct list_head *list)
 	/* Prepare pages for freeing */
 	list_for_each_entry_safe(page, next, list, lru) {
 		unsigned long pfn = page_to_pfn(page);
+#ifdef CONFIG_ADD_ZONE
+		struct zone *zone = page_zone(page);
+#endif
 		if (!free_unref_page_prepare(page, pfn)) {
 			list_del(&page->lru);
 			continue;
 		}
+#ifdef CONFIG_ADD_ZONE
+		if (strcmp(zone->name, "Custom") == 0) {
+			list_del(&page->lru);
+			free_custom_page(page);
+			continue;
+		}
+#endif
 
 		/*
 		 * Free isolated pages directly to the allocator, see
@@ -5312,6 +5384,42 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 	return true;
 }
 
+#ifdef CONFIG_ADD_ZONE
+struct page *alloc_custom_page(gfp_t gfp_mask, int preferred_nid)
+{
+	struct page *page;
+	struct zone *custom_zone;
+	struct subarray *sa;
+	u32 subarray_idx;
+	unsigned long idx;
+	unsigned long flags;
+	unsigned long wmark;
+	custom_zone = &NODE_DATA(preferred_nid)->node_zones[ZONE_CUSTOM];
+	wmark = wmark_pages(custom_zone, WMARK_LOW);
+	if (zone_page_state(custom_zone, NR_FREE_PAGES) <= wmark) {
+		wakeup_kswapd(custom_zone, gfp_mask, 0, ZONE_CUSTOM);
+	}
+	subarray_idx = prandom_u32_max(custom_zone->num_subarrays);
+	sa = &custom_zone->subarrays[subarray_idx];
+	spin_lock_irqsave(&sa->lock, flags);
+	if (sa->count > 0) {
+		idx = find_first_bit(sa->bitmap, SUBARRAY_PAGES);
+		if (idx < SUBARRAY_PAGES) {
+			__clear_bit(idx, sa->bitmap);
+			page = pfn_to_page(sa->start_pfn + idx);
+			sa->count--;
+			spin_unlock_irqrestore(&sa->lock, flags);
+			__mod_zone_page_state(custom_zone, NR_FREE_PAGES, -1);
+			ClearPageReserved(page);
+			post_alloc_hook(page, 0, gfp_mask);
+			return page;
+		}
+	}
+	spin_unlock_irqrestore(&sa->lock, flags);
+	return NULL;
+}
+#endif
+
 /*
  * This is the 'heart' of the zoned buddy allocator.
  */
@@ -5323,6 +5431,16 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
+#ifdef CONFIG_ADD_ZONE
+	if (order == 0 && is_uid_allowed(current->cred->uid.val)) {
+		page = alloc_custom_page(gfp_mask, preferred_nid);
+		if (page) {
+			return page;
+		} else {
+			printk(KERN_WARNING "[yb] OOM: fallback to normal zone!\n");
+		}
+	}
+#endif
 
 	/*
 	 * There are several places where we assume that the order value is sane
@@ -5346,8 +5464,12 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
-	if (likely(page))
+	if (likely(page)) {
+		if (page_to_pfn(page) > 3145728ul) {
+			printk(KERN_INFO "DANGER: allocated page from custom: %px", page_to_phys(page));
+		}
 		goto out;
+	}
 
 	/*
 	 * Apply scoped allocation constraints. This is mainly about GFP_NOFS
@@ -6508,7 +6630,28 @@ void __meminit memmap_init_zone(unsigned long size, int nid, unsigned long zone,
 		end_pfn = altmap->base_pfn + vmem_altmap_offset(altmap);
 	}
 #endif
+#ifdef CONFIG_ADD_ZONE
+	if (zone == ZONE_CUSTOM) {
+		for (pfn = start_pfn; pfn < end_pfn; ) {
+			struct page *page_z = pfn_to_page(pfn);
+			if (context == MEMINIT_EARLY) {
+				if (overlap_memmap_init(zone, &pfn))
+					continue;
+				if (defer_init(nid, pfn, zone_end_pfn))
+					break;
+			}
 
+			__init_single_page(page_z, pfn, zone, nid);
+			SetPageReserved(page_z);
+			if (IS_ALIGNED(pfn, pageblock_nr_pages)) {
+				set_pageblock_migratetype(page_z, migratetype);
+				cond_resched();
+			}
+			pfn++;
+		}
+		return;
+	}
+#endif
 	for (pfn = start_pfn; pfn < end_pfn; ) {
 		/*
 		 * There can be holes in boot-time mem_map[]s handed to this
@@ -6943,7 +7086,40 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 		pgdat->nr_zones = zone_idx;
 
 	zone->zone_start_pfn = zone_start_pfn;
+#ifdef CONFIG_ADD_ZONE
+	if (strcmp(zone->name, "Custom") == 0) {
+		unsigned int subarray_idx;
+		unsigned long start_pfn, end_pfn, current_pfn;
+		unsigned long subarray_start_idx, subarray_end_idx;
+		struct subarray *sa;
 
+		start_pfn = zone->zone_start_pfn;
+		current_pfn = start_pfn;
+		end_pfn = start_pfn + size;
+		zone->zone_end_pfn = end_pfn;
+		subarray_start_idx = start_pfn / 512;
+		subarray_end_idx = (end_pfn -1 ) / 512;
+		zone->num_subarrays = subarray_end_idx - subarray_start_idx;
+
+		for (subarray_idx = 0; subarray_idx < zone->num_subarrays; subarray_idx++) {
+			unsigned long subarray_base_idx = subarray_start_idx + subarray_idx;
+			unsigned long subarray_start, subarray_end;
+
+			sa = &zone->subarrays[subarray_idx];
+			bitmap_zero(sa->bitmap, SUBARRAY_PAGES);
+			subarray_start = subarray_base_idx << 9;
+			subarray_end = (subarray_base_idx + 1) << 9;
+			sa->free_pages = NULL;
+			sa->start_pfn = subarray_start;
+			sa->end_pfn = subarray_end;
+			spin_lock_init(&sa->lock);
+			sa->count = 0;
+			pr_info("Subarray %u: PFN [%lu, %lu), Pages = %lu\n",
++					subarray_idx, sa->start_pfn, sa->end_pfn, sa->count);
+			current_pfn = sa->end_pfn;
+		}
+	}
+#endif
 	mminit_dprintk(MMINIT_TRACE, "memmap_init",
 			"Initialising map node %d zone %lu pfns %lu -> %lu\n",
 			pgdat->node_id,
@@ -7859,7 +8035,11 @@ static void check_for_memory(pg_data_t *pgdat, int nid)
 		if (populated_zone(zone)) {
 			if (IS_ENABLED(CONFIG_HIGHMEM))
 				node_set_state(nid, N_HIGH_MEMORY);
+#ifdef CONFIG_ADD_ZONE
+			if (zone_type <= ZONE_CUSTOM)
+#else
 			if (zone_type <= ZONE_NORMAL)
+#endif			
 				node_set_state(nid, N_NORMAL_MEMORY);
 			break;
 		}

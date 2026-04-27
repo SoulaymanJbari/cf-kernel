@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+#define CONFIG_ADD_ZONE 1
 #ifndef _LINUX_MMZONE_H
 #define _LINUX_MMZONE_H
 
@@ -30,6 +31,21 @@
 #define MAX_ORDER CONFIG_FORCE_MAX_ZONEORDER
 #endif
 #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
+
+#ifdef CONFIG_ADD_ZONE
+#define SUBARRAY_SIZE (512 * PAGE_SIZE)  // 2MB
+#define SUBARRAY_PAGES 512
+#define SUBARRAY_SHIFT 21
+#define CUSTOM_ZONE_PAGES (7 * 512 * 512)     // total pages of zone_custom
+struct subarray {
+	spinlock_t lock;
+    struct page *free_pages;
+	unsigned long bitmap[8];
+   	unsigned int count;	//num of free pages in this subarray
+   	unsigned long start_pfn;
+   	unsigned long end_pfn;
+} ____cacheline_aligned;
+#endif
 
 /*
  * PAGE_ALLOC_COSTLY_ORDER is the order at which allocations are deemed
@@ -589,6 +605,9 @@ enum zone_type {
 	 * transfers to all addressable memory.
 	 */
 	ZONE_NORMAL,
+#ifdef CONFIG_ADD_ZONE
+	ZONE_CUSTOM,
+#endif
 #ifdef CONFIG_HIGHMEM
 	/*
 	 * A memory area that is only addressable by the kernel through
@@ -801,11 +820,19 @@ struct zone {
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
+#ifdef CONFIG_ADD_ZONE
+	struct subarray subarrays[4096];
+	unsigned int num_subarrays;
+	unsigned long zone_end_pfn;
+	ANDROID_KABI_RESERVE(1);
+
+#else
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
+#endif
 } ____cacheline_internodealigned_in_smp;
 
 enum pgdat_flags {

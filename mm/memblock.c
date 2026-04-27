@@ -119,7 +119,7 @@ struct memblock memblock __initdata_memblock = {
 	.reserved.max		= INIT_MEMBLOCK_RESERVED_REGIONS,
 	.reserved.name		= "reserved",
 
-	.bottom_up		= false,
+	.bottom_up		= true,
 	.current_limit		= MEMBLOCK_ALLOC_ANYWHERE,
 };
 

@@ -3435,3 +3435,8 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */
+
+#ifdef CONFIG_ADD_ZONE
+bool is_uid_allowed(int uid);
+int get_subarray_idx(struct page *page);
+#endif
