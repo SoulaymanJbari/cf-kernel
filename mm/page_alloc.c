@@ -9699,3 +9699,40 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	return ret;
 }
 #endif
+
+int remap_kernel_page (struct page *user_page, struct page *cache_page)
+{
+	int ret = 0;
+	struct list_head list;
+	phys_addr_t kernel_paddr;
+	int subarray_idx = get_subarray_idx(user_page);
+	if (subarray_idx < 0) {
+		printk(KERN_WARNING "[yb] user page not in custom zone!\n");
+		return -EINVAL;
+	}
+	if (subarray_idx == get_subarray_idx(cache_page)) {
+		return 1;
+	}
+	kernel_paddr = page_to_phys(cache_page);
+	printk(KERN_INFO "[add_zone]before remap: N=%s, u:%p\n", current->comm, &kernel_paddr);
+	ret = isolate_lru_page(cache_page);
+	if (ret) {
+		lru_add_drain();
+		ret = isolate_lru_page(cache_page);
+		if (ret) {
+			printk(KERN_WARNING "[yb] Failed to isolate lru page!\n");
+			return ret;
+		}
+	}
+	put_page(cache_page);
+	INIT_LIST_HEAD(&list);
+	list_add_tail(&cache_page->lru, &list);
+
+	ret = migrate_pages(&list, alloc_same_subarray, NULL, (unsigned long)subarray_idx,
+						MIGRATE_SYNC_NO_COPY_NO_LOCK, MR_SYSCALL);
+	if (ret) {
+		printk(KERN_WARNING "[yb] Failed to migrate page!\n");
+		putback_movable_pages(&list);
+	}
+	return ret;
+}

@@ -1008,7 +1008,7 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 	struct anon_vma *anon_vma = NULL;
 	bool is_lru = !__PageMovable(page);
 
-	if (!trylock_page(page)) {
+	if (!trylock_page(page) && mode != MIGRATE_SYNC_NO_COPY_NO_LOCK) {
 		if (!force || mode == MIGRATE_ASYNC)
 			goto out;
 
