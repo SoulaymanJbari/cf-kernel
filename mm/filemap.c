@@ -2368,13 +2368,8 @@ page_ok:
 			}
 			to_copy = min(to_copy, iter->iov->iov_len - iter->iov_offset);
 			if (to_copy == 4096 && ((user_virt_addr) & (~PAGE_MASK)) == 0) {
-				if ((res = remap_user_page(user_virt_addr, page))) {
-					printk(KERN_INFO "[yb] could not remap user page: %d!\n", -res);
-				} else {
-					printk(KERN_INFO "[yb] remap successful!\n");
-				}
+				res = remap_user_page(user_virt_addr, page);
 			}
-
 			ret = copy_page_to_iter(page, offset, nr, iter);
 			npages = get_user_pages_fast(user_virt_addr, 1, 0, user_page);
 
@@ -2384,15 +2379,15 @@ page_ok:
 					printk(KERN_EMERG "[yb] read same subarray!\n");
 				}
 				user_phys_addr = page_to_phys(user_page[0]);
-				printk(KERN_EMERG 
+				if (to_copy == 4096) {
+					printk(KERN_EMERG 
 					"[test_mobile] N=%s,r,%d,%lld,0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
 					current->comm, current->cpu, ret,
 					page_to_virt(page), kernel_phys_addr,
 					user_virt_addr,
 					user_phys_addr + (user_virt_addr & ~PAGE_MASK));
+				}
 				put_page(user_page[0]);
-			} else {
-				printk(KERN_EMERG "[yb] Failed to get user page!\n");
 			}
 			kvfree(user_page);
 		} else {
@@ -3573,12 +3568,9 @@ again:
 			npages = get_user_pages_fast(user_virt_addr, 1, 0, user_page);
 			if (npages > 0 && bytes == 4096 && (user_virt_addr & (~PAGE_MASK)) == 0) {
 				if (!(ret = remap_kernel_page(user_page[0], page))) {
-					printk("[yb] Succesfully remapped kernel page!\n");
 					put_page(user_page[0]);
 					kvfree(user_page);
 					goto again;
-				} else {
-					printk("[yb] Failed to remap kernel page: %d!\n", ret);
 				}
 			}
 			copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
@@ -3589,13 +3581,13 @@ again:
 				if (subarray_idx >= 0 && subarray_idx == get_subarray_idx(user_page[0])) {
 					printk(KERN_EMERG "[yb] write same subarray!\n");
 				}
-				printk(KERN_EMERG "[test_mobile] N=%s,w,%d,%llu,0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
+				if (bytes == 4096) {
+					printk(KERN_EMERG "[test_mobile] N=%s,w,%d,%llu,0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
 						current->comm, current->cpu, copied, 
 						page_to_virt(page), kernel_phys_addr,
 						user_virt_addr, user_phys_addr + (user_virt_addr & ~PAGE_MASK));
+				}
 				put_page(user_page[0]);
-			} else {
-				printk(KERN_EMERG "[yb] Failed to get user page!\n");
 			}
 			kvfree(user_page);
 		} else {

@@ -9643,7 +9643,6 @@ static struct page *alloc_same_subarray(struct page *old_page,
 		}
 	}
 	spin_unlock_irqrestore(&sa->lock, flags);
-	printk(KERN_WARNING "[yb] subarray full cannot migrate!\n");
 	return NULL;
 }
 
@@ -9657,33 +9656,28 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	phys_addr_t user_paddr;
 	int subarray_idx = get_subarray_idx(cache_page);
 	if (subarray_idx < 0) {
-		printk(KERN_WARNING "[yb] page cache page not in custom zone!\n");
 		return -EINVAL;
 	}
 	mmap_read_lock(mm);
 	vma = find_vma(mm, untagged_addr(user_vaddr));
 	if (!vma || user_vaddr < vma->vm_start) {
 		mmap_read_unlock(mm);
-		printk(KERN_WARNING "[yb] Could not find VMA!\n");
 		return -EINVAL;
 	}
 	page = follow_page(vma, user_vaddr, 0);
 	mmap_read_unlock(mm);
 	if (!page || IS_ERR(page)) {
-		printk(KERN_WARNING "[yb] Could not follow page!\n");
 		return -EINVAL;
 	}
 	if (subarray_idx == get_subarray_idx(page)) {
 		return 0;
 	}
 	user_paddr = page_to_phys(page);
-	printk(KERN_INFO "[add_zone]before remap: N=%s, u:%p\n", current->comm, &user_paddr);
 	ret = isolate_lru_page(page);
 	if (ret) {
 		lru_add_drain();
 		ret = isolate_lru_page(page);
 		if (ret) {
-			printk(KERN_WARNING "[yb] Failed to isolate lru page!\n");
 			return ret;
 		}
 	}
@@ -9693,7 +9687,6 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	ret = migrate_pages(&list, alloc_same_subarray, NULL,
 		(unsigned long)subarray_idx, MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
 	if (ret) {
-		printk(KERN_WARNING "[yb] Failed to migrate page!\n");
 		putback_movable_pages(&list);
 	}
 	return ret;
@@ -9707,20 +9700,17 @@ int remap_kernel_page (struct page *user_page, struct page *cache_page)
 	phys_addr_t kernel_paddr;
 	int subarray_idx = get_subarray_idx(user_page);
 	if (subarray_idx < 0) {
-		printk(KERN_WARNING "[yb] user page not in custom zone!\n");
 		return -EINVAL;
 	}
 	if (subarray_idx == get_subarray_idx(cache_page)) {
 		return 1;
 	}
 	kernel_paddr = page_to_phys(cache_page);
-	printk(KERN_INFO "[add_zone]before remap: N=%s, u:%p\n", current->comm, &kernel_paddr);
 	ret = isolate_lru_page(cache_page);
 	if (ret) {
 		lru_add_drain();
 		ret = isolate_lru_page(cache_page);
 		if (ret) {
-			printk(KERN_WARNING "[yb] Failed to isolate lru page!\n");
 			return ret;
 		}
 	}
@@ -9731,7 +9721,6 @@ int remap_kernel_page (struct page *user_page, struct page *cache_page)
 	ret = migrate_pages(&list, alloc_same_subarray, NULL, (unsigned long)subarray_idx,
 						MIGRATE_SYNC_NO_COPY_NO_LOCK, MR_SYSCALL);
 	if (ret) {
-		printk(KERN_WARNING "[yb] Failed to migrate page!\n");
 		putback_movable_pages(&list);
 	}
 	return ret;
