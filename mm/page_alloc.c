@@ -9665,14 +9665,16 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 		return -EINVAL;
 	}
 	page = follow_page(vma, user_vaddr, 0);
+	if (page && !IS_ERR(page) && subarray_idx == get_subarray_idx(page)) {
+		user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
+		mmap_read_unlock(mm);
+		trace_printk("[RC] 0x%llx 0x%llx\n", page_to_phys(cache_page), user_paddr);
+		return 0;
+	}
 	mmap_read_unlock(mm);
 	if (!page || IS_ERR(page)) {
 		return -EINVAL;
 	}
-	if (subarray_idx == get_subarray_idx(page)) {
-		return 0;
-	}
-	user_paddr = page_to_phys(page);
 	ret = isolate_lru_page(page);
 	if (ret) {
 		lru_add_drain();
@@ -9686,7 +9688,15 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 
 	ret = migrate_pages(&list, alloc_same_subarray, NULL,
 		(unsigned long)subarray_idx, MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
-	if (ret) {
+	if (ret == 0) {
+		mmap_read_lock(mm);
+		page = follow_page(vma, user_vaddr, 0);
+		if (page && !IS_ERR(page)) {
+			user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
+			trace_printk("[RC] 0x%llx 0x%llx\n", page_to_phys(cache_page), user_paddr);
+		}
+		mmap_read_unlock(mm);
+	} else {
 		putback_movable_pages(&list);
 	}
 	return ret;
@@ -9698,14 +9708,17 @@ int remap_kernel_page (struct page *user_page, struct page *cache_page)
 	int ret = 0;
 	struct list_head list;
 	phys_addr_t kernel_paddr;
+	phys_addr_t user_paddr;
 	int subarray_idx = get_subarray_idx(user_page);
 	if (subarray_idx < 0) {
 		return -EINVAL;
 	}
 	if (subarray_idx == get_subarray_idx(cache_page)) {
+		kernel_paddr = page_to_phys(cache_page);
+		user_paddr = page_to_phys(user_page);		
+		trace_printk("[RC] 0x%llx 0x%llx\n", user_paddr, kernel_paddr);
 		return 1;
 	}
-	kernel_paddr = page_to_phys(cache_page);
 	ret = isolate_lru_page(cache_page);
 	if (ret) {
 		lru_add_drain();

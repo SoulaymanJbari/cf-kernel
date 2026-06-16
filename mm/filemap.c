@@ -2352,17 +2352,9 @@ page_ok:
 		 * now we can copy it to user space...
 		 */
 		if (current->cred->uid.val >= 10000) {
-			phys_addr_t kernel_phys_addr;
-			phys_addr_t user_phys_addr;
-			uintptr_t user_virt_addr;
-			int subarray_idx;
-			int res = 0;
 			unsigned long to_copy = nr;
-			int npages = 0;
-			struct page **user_page;
 			user_virt_addr = (uintptr_t)iter->iov->iov_base + iter->iov_offset;
-			user_page = kvcalloc(1, sizeof(void *), GFP_KERNEL);
-			kernel_phys_addr = page_to_phys(page) + offset;
+
 			if (iter->count < nr) {
 				to_copy = iter->count;
 			}
@@ -2370,29 +2362,8 @@ page_ok:
 			if (to_copy == 4096 && ((user_virt_addr) & (~PAGE_MASK)) == 0) {
 				res = remap_user_page(user_virt_addr, page);
 			}
-			ret = copy_page_to_iter(page, offset, nr, iter);
-			npages = get_user_pages_fast(user_virt_addr, 1, 0, user_page);
-
-			if (npages > 0) {
-				subarray_idx = get_subarray_idx(page);
-				if (subarray_idx >=0 && subarray_idx == get_subarray_idx(user_page[0])) {
-					printk(KERN_EMERG "[yb] read same subarray!\n");
-				}
-				user_phys_addr = page_to_phys(user_page[0]);
-				if (to_copy == 4096) {
-					printk(KERN_EMERG 
-					"[test_mobile] N=%s,r,%d,%lld,0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
-					current->comm, current->cpu, ret,
-					page_to_virt(page), kernel_phys_addr,
-					user_virt_addr,
-					user_phys_addr + (user_virt_addr & ~PAGE_MASK));
-				}
-				put_page(user_page[0]);
-			}
-			kvfree(user_page);
-		} else {
-			ret = copy_page_to_iter(page, offset, nr, iter);
-		}
+		} 
+		ret = copy_page_to_iter(page, offset, nr, iter);
 		offset += ret;
 		index += offset >> PAGE_SHIFT;
 		offset &= ~PAGE_MASK;
@@ -3555,46 +3526,20 @@ again:
 			flush_dcache_page(page);
 		
 		if (current->mm && current->cred->uid.val >= 10000) {
-			int ret = 0;
-			phys_addr_t kernel_phys_addr;
-			phys_addr_t user_phys_addr;
-			uintptr_t user_virt_addr;
-			int subarray_idx;
-			int npages=0;
-			struct page **user_page;
-			user_page = kvcalloc(1, sizeof(void *), GFP_KERNEL);
-			kernel_phys_addr = page_to_phys(page) + offset;
 			user_virt_addr = (uintptr_t)i->iov->iov_base + i->iov_offset;
-			npages = get_user_pages_fast(user_virt_addr, 1, 0, user_page);
-			if (npages > 0 && bytes == 4096 && (user_virt_addr & (~PAGE_MASK)) == 0) {
-				if (!(ret = remap_kernel_page(user_page[0], page))) {
-					put_page(user_page[0]);
-					kvfree(user_page);
-					goto again;
+			if (bytes == 4096 && (user_virt_addr & (~PAGE_MASK)) == 0) {
+				struct page *user_page_ptr = NULL;
+				int npages = get_user_pages_fast(user_virt_addr, 1, 0, &user_page_ptr);
+				if (npages > 0) {
+					int remap_res = remap_kernel_page(user_page_ptr, page);
+					put_page(user_page_ptr);
+					if (!remap_res) {
+						goto again;
+					}
 				}
 			}
 			copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
 			flush_dcache_page(page);
-			if (npages > 0) {
-				user_phys_addr = page_to_phys(user_page[0]);
-				subarray_idx = get_subarray_idx(page);
-				if (subarray_idx >= 0 && subarray_idx == get_subarray_idx(user_page[0])) {
-					printk(KERN_EMERG "[yb] write same subarray!\n");
-				}
-				if (bytes == 4096) {
-					printk(KERN_EMERG "[test_mobile] N=%s,w,%d,%llu,0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
-						current->comm, current->cpu, copied, 
-						page_to_virt(page), kernel_phys_addr,
-						user_virt_addr, user_phys_addr + (user_virt_addr & ~PAGE_MASK));
-				}
-				put_page(user_page[0]);
-			}
-			kvfree(user_page);
-		} else {
-			copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
-			flush_dcache_page(page);
-		}
-
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
 						page, fsdata);
 		if (unlikely(status < 0))
