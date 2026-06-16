@@ -84,6 +84,7 @@
 #ifdef CONFIG_ADD_ZONE
 #include <asm/pgtable.h>
 #define PAGE_PROT_BITS (PTE_VALID | PTE_WRITE | PTE_USER | PTE_PXN | PTE_UXN)
+#include <trace/events/rowclone.h>
 extern unsigned long custom_zone_start_pfn;
 
 bool is_uid_allowed(int uid)
@@ -9668,7 +9669,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	if (page && !IS_ERR(page) && subarray_idx == get_subarray_idx(page)) {
 		user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
 		mmap_read_unlock(mm);
-		trace_printk("[RC] 0x%llx 0x%llx\n", page_to_phys(cache_page), user_paddr);
+		trace_rowclone_read(page_to_phys(cache_page), user_paddr);
 		return 0;
 	}
 	mmap_read_unlock(mm);
@@ -9693,7 +9694,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 		page = follow_page(vma, user_vaddr, 0);
 		if (page && !IS_ERR(page)) {
 			user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
-			trace_printk("[RC] 0x%llx 0x%llx\n", page_to_phys(cache_page), user_paddr);
+			trace_rowclone_read(page_to_phys(cache_page), user_paddr);
 		}
 		mmap_read_unlock(mm);
 	} else {
@@ -9701,7 +9702,6 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	}
 	return ret;
 }
-#endif
 
 int remap_kernel_page (struct page *user_page, struct page *cache_page)
 {
@@ -9716,7 +9716,7 @@ int remap_kernel_page (struct page *user_page, struct page *cache_page)
 	if (subarray_idx == get_subarray_idx(cache_page)) {
 		kernel_paddr = page_to_phys(cache_page);
 		user_paddr = page_to_phys(user_page);		
-		trace_printk("[RC] 0x%llx 0x%llx\n", user_paddr, kernel_paddr);
+		trace_rowclone_write(user_paddr, kernel_paddr);
 		return 1;
 	}
 	ret = isolate_lru_page(cache_page);
@@ -9738,3 +9738,4 @@ int remap_kernel_page (struct page *user_page, struct page *cache_page)
 	}
 	return ret;
 }
+#endif

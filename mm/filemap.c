@@ -2353,14 +2353,14 @@ page_ok:
 		 */
 		if (current->cred->uid.val >= 10000) {
 			unsigned long to_copy = nr;
-			user_virt_addr = (uintptr_t)iter->iov->iov_base + iter->iov_offset;
+			uintptr_t user_virt_addr = (uintptr_t)iter->iov->iov_base + iter->iov_offset;
 
 			if (iter->count < nr) {
 				to_copy = iter->count;
 			}
 			to_copy = min(to_copy, iter->iov->iov_len - iter->iov_offset);
 			if (to_copy == 4096 && ((user_virt_addr) & (~PAGE_MASK)) == 0) {
-				res = remap_user_page(user_virt_addr, page);
+				remap_user_page(user_virt_addr, page);
 			}
 		} 
 		ret = copy_page_to_iter(page, offset, nr, iter);
@@ -3526,7 +3526,7 @@ again:
 			flush_dcache_page(page);
 		
 		if (current->mm && current->cred->uid.val >= 10000) {
-			user_virt_addr = (uintptr_t)i->iov->iov_base + i->iov_offset;
+			uintptr_t user_virt_addr = (uintptr_t)i->iov->iov_base + i->iov_offset;
 			if (bytes == 4096 && (user_virt_addr & (~PAGE_MASK)) == 0) {
 				struct page *user_page_ptr = NULL;
 				int npages = get_user_pages_fast(user_virt_addr, 1, 0, &user_page_ptr);
@@ -3538,8 +3538,9 @@ again:
 					}
 				}
 			}
-			copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
-			flush_dcache_page(page);
+		}
+		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
+		flush_dcache_page(page);
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
 						page, fsdata);
 		if (unlikely(status < 0))
