@@ -36,7 +36,7 @@
 #define SUBARRAY_SIZE (512 * PAGE_SIZE)  // 2MB
 #define SUBARRAY_PAGES 512
 #define SUBARRAY_SHIFT 21
-#define LAR_ZONE_PAGES (7 * 512 * 512)     // total pages of lar_zone
+#define LAR_ZONE_PERCENT 80
 struct subarray {
 	spinlock_t lock;
     struct page *free_pages;

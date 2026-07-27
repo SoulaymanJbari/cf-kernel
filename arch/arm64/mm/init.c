@@ -252,9 +252,27 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 		arm64_dma_phys_limit = dma32_phys_limit;
 #endif
 #ifdef CONFIG_ZONE_LAR
-	max_zone_pfns[ZONE_NORMAL] = max - LAR_ZONE_PAGES;
-	lar_zone_start_pfn = max - LAR_ZONE_PAGES;
-	max_zone_pfns[ZONE_LAR] = max;
+	{
+		unsigned long normal_start_pfn = min;
+		unsigned long high_mem_pages;
+		unsigned long lar_pages;
+#ifdef CONFIG_ZONE_DMA32
+		if (!disable_dma32)
+			normal_start_pfn = max_t(unsigned long, normal_start_pfn, PFN_DOWN(dma32_phys_limit));
+#endif
+#ifdef CONFIG_ZONE_DMA
+		normal_start_pfn  = max_t(unsigned long, normal_start_pfn, PFN_DOWN(arm64_dma_phys_limit));
+#endif
+		if (max > normal_start_pfn)
+			high_mem_pages = max - normal_start_pfn;
+		else {
+			high_mem_pages = 0;
+		}
+		lar_pages = (high_mem_pages * LAR_ZONE_PERCENT) / 100;
+		max_zone_pfns[ZONE_NORMAL] = max - lar_pages;
+		lar_zone_start_pfn = max - lar_pages;
+		max_zone_pfns[ZONE_LAR] = max;
+	}
 #else
 	max_zone_pfns[ZONE_NORMAL] = max;
 #endif
