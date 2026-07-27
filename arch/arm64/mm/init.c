@@ -269,8 +269,8 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 			high_mem_pages = 0;
 		}
 		lar_pages = (high_mem_pages * LAR_ZONE_PERCENT) / 100;
-		max_zone_pfns[ZONE_NORMAL] = max - lar_pages;
-		lar_zone_start_pfn = max - lar_pages;
+		lar_zone_start_pfn = ALIGN_DOWN(max - lar_pages, SUBARRAY_PAGES);
+		max_zone_pfns[ZONE_NORMAL] = lar_zone_start_pfn;
 		max_zone_pfns[ZONE_LAR] = max;
 	}
 #else

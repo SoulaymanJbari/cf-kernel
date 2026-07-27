@@ -824,6 +824,7 @@ struct zone {
 	struct subarray subarrays[4096];
 	unsigned int num_subarrays;
 	unsigned long zone_end_pfn;
+	DECLARE_BITMAP(full_subarrays_bitmap, 4096);
 	ANDROID_KABI_RESERVE(1);
 #else
 
