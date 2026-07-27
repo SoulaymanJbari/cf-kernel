@@ -5433,7 +5433,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 #ifdef CONFIG_ZONE_LAR
-	if (order == 0 && is_uid_allowed(current->cred->uid.val)) {
+	if (order == 0) {
 		page = alloc_lar_page(gfp_mask, preferred_nid);
 		if (page) {
 			return page;

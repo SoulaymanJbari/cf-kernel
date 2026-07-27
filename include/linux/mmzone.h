@@ -825,7 +825,6 @@ struct zone {
 	unsigned int num_subarrays;
 	unsigned long zone_end_pfn;
 	ANDROID_KABI_RESERVE(1);
-
 #else
 
 	ANDROID_KABI_RESERVE(1);
