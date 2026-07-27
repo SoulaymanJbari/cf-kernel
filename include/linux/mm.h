@@ -3436,7 +3436,7 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */
 
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 bool is_uid_allowed(int uid);
 int remap_user_page(unsigned long user_vaddr, struct page* cache_page);
 int remap_kernel_page(struct page *user_page, struct page *cache_page);

@@ -81,11 +81,11 @@
 #include "internal.h"
 #include "shuffle.h"
 #include "page_reporting.h"
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 #include <asm/pgtable.h>
 #define PAGE_PROT_BITS (PTE_VALID | PTE_WRITE | PTE_USER | PTE_PXN | PTE_UXN)
 #include <trace/events/rowclone.h>
-extern unsigned long custom_zone_start_pfn;
+extern unsigned long lar_zone_start_pfn;
 
 bool is_uid_allowed(int uid)
 {
@@ -315,8 +315,8 @@ int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES] = {
 	[ZONE_DMA32] = 256,
 #endif
 	[ZONE_NORMAL] = 32,
-#ifdef CONFIG_ADD_ZONE
-	[ZONE_CUSTOM] = 0,
+#ifdef CONFIG_ZONE_LAR
+	[ZONE_LAR] = 0,
 #endif
 #ifdef CONFIG_HIGHMEM
 	[ZONE_HIGHMEM] = 0,
@@ -332,8 +332,8 @@ static char * const zone_names[MAX_NR_ZONES] = {
 	 "DMA32",
 #endif
 	 "Normal",
-#ifdef CONFIG_ADD_ZONE
-	 "Custom",
+#ifdef CONFIG_ZONE_LAR
+	 "LAR",
 #endif
 #ifdef CONFIG_HIGHMEM
 	 "HighMem",
@@ -1033,16 +1033,16 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 	       page_is_buddy(higher_page, higher_buddy, order + 1);
 }
 
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 int get_subarray_idx(struct page *page)
 {
 	struct zone *zone = page_zone(page);
-	if (zone_idx(zone) != ZONE_CUSTOM)
+	if (zone_idx(zone) != ZONE_LAR)
 		return -1;
 	return page_to_pfn(page) / 512 - (zone->zone_start_pfn / 512);
 }
 
-void free_custom_page(struct page *page) 
+void free_lar_page(struct page *page) 
 {
 	unsigned long pfn = page_to_pfn(page);
 	unsigned long flags;
@@ -1099,9 +1099,9 @@ static inline void __free_one_page(struct page *page,
 	struct page *buddy;
 	bool to_tail;
 	int i;
-	if (zone_idx(zone) == ZONE_CUSTOM) {
+	if (zone_idx(zone) == ZONE_LAR) {
 		for (i = 0; i < (1 << order); ++i) {
-			free_custom_page(page + i);
+			free_lar_page(page + i);
 		}
 		return;
 	}
@@ -3445,11 +3445,11 @@ void free_unref_page(struct page *page)
 	bool freed_pcp = false;
 	if (!free_unref_page_prepare(page, pfn))
 		return;
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 	zone = page_zone(page);
-	if (strcmp(zone->name, "Custom") != 0)
+	if (strcmp(zone->name, "LAR") != 0)
 		goto origin;
-	free_custom_page(page);
+	free_lar_page(page);
 	return;
 origin:
 #endif
@@ -3503,17 +3503,17 @@ void free_unref_page_list(struct list_head *list)
 	/* Prepare pages for freeing */
 	list_for_each_entry_safe(page, next, list, lru) {
 		unsigned long pfn = page_to_pfn(page);
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 		struct zone *zone = page_zone(page);
 #endif
 		if (!free_unref_page_prepare(page, pfn)) {
 			list_del(&page->lru);
 			continue;
 		}
-#ifdef CONFIG_ADD_ZONE
-		if (strcmp(zone->name, "Custom") == 0) {
+#ifdef CONFIG_ZONE_LAR
+		if (strcmp(zone->name, "LAR") == 0) {
 			list_del(&page->lru);
-			free_custom_page(page);
+			free_lar_page(page);
 			continue;
 		}
 #endif
@@ -5385,23 +5385,23 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 	return true;
 }
 
-#ifdef CONFIG_ADD_ZONE
-struct page *alloc_custom_page(gfp_t gfp_mask, int preferred_nid)
+#ifdef CONFIG_ZONE_LAR
+struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 {
 	struct page *page;
-	struct zone *custom_zone;
+	struct zone *lar_zone;
 	struct subarray *sa;
 	u32 subarray_idx;
 	unsigned long idx;
 	unsigned long flags;
 	unsigned long wmark;
-	custom_zone = &NODE_DATA(preferred_nid)->node_zones[ZONE_CUSTOM];
-	wmark = wmark_pages(custom_zone, WMARK_LOW);
-	if (zone_page_state(custom_zone, NR_FREE_PAGES) <= wmark) {
-		wakeup_kswapd(custom_zone, gfp_mask, 0, ZONE_CUSTOM);
+	lar_zone = &NODE_DATA(preferred_nid)->node_zones[ZONE_LAR];
+	wmark = wmark_pages(lar_zone, WMARK_LOW);
+	if (zone_page_state(lar_zone, NR_FREE_PAGES) <= wmark) {
+		wakeup_kswapd(lar_zone, gfp_mask, 0, ZONE_LAR);
 	}
-	subarray_idx = prandom_u32_max(custom_zone->num_subarrays);
-	sa = &custom_zone->subarrays[subarray_idx];
+	subarray_idx = prandom_u32_max(lar_zone->num_subarrays);
+	sa = &lar_zone->subarrays[subarray_idx];
 	spin_lock_irqsave(&sa->lock, flags);
 	if (sa->count > 0) {
 		idx = find_first_bit(sa->bitmap, SUBARRAY_PAGES);
@@ -5410,7 +5410,7 @@ struct page *alloc_custom_page(gfp_t gfp_mask, int preferred_nid)
 			page = pfn_to_page(sa->start_pfn + idx);
 			sa->count--;
 			spin_unlock_irqrestore(&sa->lock, flags);
-			__mod_zone_page_state(custom_zone, NR_FREE_PAGES, -1);
+			__mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
 			ClearPageReserved(page);
 			post_alloc_hook(page, 0, gfp_mask);
 			return page;
@@ -5432,9 +5432,9 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 	if (order == 0 && is_uid_allowed(current->cred->uid.val)) {
-		page = alloc_custom_page(gfp_mask, preferred_nid);
+		page = alloc_lar_page(gfp_mask, preferred_nid);
 		if (page) {
 			return page;
 		} else {
@@ -5467,7 +5467,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
 	if (likely(page)) {
 		if (page_to_pfn(page) > 3145728ul) {
-			printk(KERN_INFO "DANGER: allocated page from custom: %px", page_to_phys(page));
+			printk(KERN_INFO "DANGER: allocated page from lar: %px", page_to_phys(page));
 		}
 		goto out;
 	}
@@ -6631,8 +6631,8 @@ void __meminit memmap_init_zone(unsigned long size, int nid, unsigned long zone,
 		end_pfn = altmap->base_pfn + vmem_altmap_offset(altmap);
 	}
 #endif
-#ifdef CONFIG_ADD_ZONE
-	if (zone == ZONE_CUSTOM) {
+#ifdef CONFIG_ZONE_LAR
+	if (zone == ZONE_LAR) {
 		for (pfn = start_pfn; pfn < end_pfn; ) {
 			struct page *page_z = pfn_to_page(pfn);
 			if (context == MEMINIT_EARLY) {
@@ -7087,8 +7087,8 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 		pgdat->nr_zones = zone_idx;
 
 	zone->zone_start_pfn = zone_start_pfn;
-#ifdef CONFIG_ADD_ZONE
-	if (strcmp(zone->name, "Custom") == 0) {
+#ifdef CONFIG_ZONE_LAR
+	if (strcmp(zone->name, "LAR") == 0) {
 		unsigned int subarray_idx;
 		unsigned long start_pfn, end_pfn, current_pfn;
 		unsigned long subarray_start_idx, subarray_end_idx;
@@ -8036,8 +8036,8 @@ static void check_for_memory(pg_data_t *pgdat, int nid)
 		if (populated_zone(zone)) {
 			if (IS_ENABLED(CONFIG_HIGHMEM))
 				node_set_state(nid, N_HIGH_MEMORY);
-#ifdef CONFIG_ADD_ZONE
-			if (zone_type <= ZONE_CUSTOM)
+#ifdef CONFIG_ZONE_LAR
+			if (zone_type <= ZONE_LAR)
 #else
 			if (zone_type <= ZONE_NORMAL)
 #endif			
@@ -9617,18 +9617,18 @@ bool has_managed_dma(void)
 }
 #endif /* CONFIG_ZONE_DMA */
 
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 
 static struct page *alloc_same_subarray(struct page *old_page, 
 									unsigned long subarray_idx)
 {
 	struct page *page;
-	struct zone *custom_zone;
+	struct zone *lar_zone;
 	struct subarray *sa;
 	unsigned long idx;
 	unsigned long flags;
-	custom_zone = &NODE_DATA(0)->node_zones[ZONE_CUSTOM];
-	sa = &custom_zone->subarrays[subarray_idx];
+	lar_zone = &NODE_DATA(0)->node_zones[ZONE_LAR];
+	sa = &lar_zone->subarrays[subarray_idx];
 	spin_lock_irqsave(&sa->lock, flags);
 	if (sa->count > 0) {
 		idx = find_first_bit(sa->bitmap, SUBARRAY_PAGES);
@@ -9637,7 +9637,7 @@ static struct page *alloc_same_subarray(struct page *old_page,
 			page = pfn_to_page(sa->start_pfn + idx);
 			sa->count--;
 			spin_unlock_irqrestore(&sa->lock, flags);
-			__mod_zone_page_state(custom_zone, NR_FREE_PAGES, -1);
+			__mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
 			ClearPageReserved(page);
 			post_alloc_hook(page, 0, GFP_HIGHUSER_MOVABLE);
 			return page;

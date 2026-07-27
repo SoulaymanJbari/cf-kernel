@@ -56,9 +56,9 @@
 s64 memstart_addr __ro_after_init = -1;
 EXPORT_SYMBOL(memstart_addr);
 
-#ifdef CONFIG_ADD_ZONE
-unsigned long custom_zone_start_pfn = 0;
-EXPORT_SYMBOL(custom_zone_start_pfn);
+#ifdef CONFIG_ZONE_LAR
+unsigned long lar_zone_start_pfn = 0;
+EXPORT_SYMBOL(lar_zone_start_pfn);
 #endif
 
 /*
@@ -251,10 +251,10 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	if (!arm64_dma_phys_limit)
 		arm64_dma_phys_limit = dma32_phys_limit;
 #endif
-#ifdef CONFIG_ADD_ZONE
-	max_zone_pfns[ZONE_NORMAL] = max - CUSTOM_ZONE_PAGES;
-	custom_zone_start_pfn = max - CUSTOM_ZONE_PAGES;
-	max_zone_pfns[ZONE_CUSTOM] = max;
+#ifdef CONFIG_ZONE_LAR
+	max_zone_pfns[ZONE_NORMAL] = max - LAR_ZONE_PAGES;
+	lar_zone_start_pfn = max - LAR_ZONE_PAGES;
+	max_zone_pfns[ZONE_LAR] = max;
 #else
 	max_zone_pfns[ZONE_NORMAL] = max;
 #endif

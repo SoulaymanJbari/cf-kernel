@@ -1789,7 +1789,7 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 
 		if (page_zonenum(page) > sc->reclaim_idx ||
 				skip_cma(page, sc) ||
-			(sc->reclaim_idx == ZONE_CUSTOM && page_zonenum(page) != ZONE_CUSTOM)) {
+			(sc->reclaim_idx == ZONE_LAR && page_zonenum(page) != ZONE_LAR)) {
 			list_move(&page->lru, &pages_skipped);
 			nr_skipped[page_zonenum(page)] += nr_pages;
 			continue;
@@ -6341,7 +6341,7 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 	unsigned long mark = -1;
 	struct zone *zone;
 
-	if (highest_zoneidx == ZONE_CUSTOM) {
+	if (highest_zoneidx == ZONE_LAR) {
 		return false;
 	}
 
@@ -6442,7 +6442,7 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 		sc->nr_to_reclaim += max(high_wmark_pages(zone), SWAP_CLUSTER_MAX);
 	}
 
-	if (sc->reclaim_idx == ZONE_CUSTOM) {
+	if (sc->reclaim_idx == ZONE_LAR) {
 		sc->nr_to_reclaim = high_wmark_pages(zone);
 	}
 
@@ -6937,9 +6937,9 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 	pgdat = zone->zone_pgdat;
 	curr_idx = READ_ONCE(pgdat->kswapd_highest_zoneidx);
 
-	if (highest_zoneidx == ZONE_CUSTOM) {
-		WRITE_ONCE(pgdat->kswapd_highest_zoneidx, ZONE_CUSTOM);
-	} else if(curr_idx == ZONE_CUSTOM) {
+	if (highest_zoneidx == ZONE_LAR) {
+		WRITE_ONCE(pgdat->kswapd_highest_zoneidx, ZONE_LAR);
+	} else if(curr_idx == ZONE_LAR) {
 		WRITE_ONCE(pgdat->kswapd_highest_zoneidx, highest_zoneidx);
 	} else if (curr_idx == MAX_NR_ZONES || curr_idx < highest_zoneidx) {
 		WRITE_ONCE(pgdat->kswapd_highest_zoneidx, highest_zoneidx);

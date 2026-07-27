@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#define CONFIG_ADD_ZONE 1
+#define CONFIG_ZONE_LAR 1
 #ifndef _LINUX_MMZONE_H
 #define _LINUX_MMZONE_H
 
@@ -32,11 +32,11 @@
 #endif
 #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
 
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 #define SUBARRAY_SIZE (512 * PAGE_SIZE)  // 2MB
 #define SUBARRAY_PAGES 512
 #define SUBARRAY_SHIFT 21
-#define CUSTOM_ZONE_PAGES (7 * 512 * 512)     // total pages of zone_custom
+#define LAR_ZONE_PAGES (7 * 512 * 512)     // total pages of lar_zone
 struct subarray {
 	spinlock_t lock;
     struct page *free_pages;
@@ -605,8 +605,8 @@ enum zone_type {
 	 * transfers to all addressable memory.
 	 */
 	ZONE_NORMAL,
-#ifdef CONFIG_ADD_ZONE
-	ZONE_CUSTOM,
+#ifdef CONFIG_ZONE_LAR
+	ZONE_LAR,
 #endif
 #ifdef CONFIG_HIGHMEM
 	/*
@@ -820,7 +820,7 @@ struct zone {
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
-#ifdef CONFIG_ADD_ZONE
+#ifdef CONFIG_ZONE_LAR
 	struct subarray subarrays[4096];
 	unsigned int num_subarrays;
 	unsigned long zone_end_pfn;
