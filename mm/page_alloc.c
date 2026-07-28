@@ -9689,6 +9689,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	if (page && !IS_ERR(page) && subarray_idx == get_subarray_idx(page)) {
 		user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
 		mmap_read_unlock(mm);
+		rowclone_inc_read();
 		trace_rowclone_read(page_to_phys(cache_page), user_paddr);
 		return 0;
 	}
@@ -9714,6 +9715,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 		page = follow_page(vma, user_vaddr, 0);
 		if (page && !IS_ERR(page)) {
 			user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
+			rowclone_inc_read();
 			trace_rowclone_read(page_to_phys(cache_page), user_paddr);
 		}
 		mmap_read_unlock(mm);
@@ -9723,39 +9725,162 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 	return ret;
 }
 
-int remap_kernel_page (struct page *user_page, struct page *cache_page)
+int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgoff_t index)
 {
-	int ret = 0;
-	struct list_head list;
-	phys_addr_t kernel_paddr;
-	phys_addr_t user_paddr;
-	int subarray_idx = get_subarray_idx(user_page);
-	if (subarray_idx < 0) {
-		return -EINVAL;
-	}
-	if (subarray_idx == get_subarray_idx(cache_page)) {
-		kernel_paddr = page_to_phys(cache_page);
-		user_paddr = page_to_phys(user_page);		
-		trace_rowclone_write(user_paddr, kernel_paddr);
-		return 1;
-	}
-	ret = isolate_lru_page(cache_page);
-	if (ret) {
-		lru_add_drain();
-		ret = isolate_lru_page(cache_page);
-		if (ret) {
-			return ret;
-		}
-	}
-	put_page(cache_page);
-	INIT_LIST_HEAD(&list);
-	list_add_tail(&cache_page->lru, &list);
-
-	ret = migrate_pages(&list, alloc_same_subarray, NULL, (unsigned long)subarray_idx,
-						MIGRATE_SYNC_NO_COPY_NO_LOCK, MR_SYSCALL);
-	if (ret) {
-		putback_movable_pages(&list);
-	}
-	return ret;
+    int subarray_idx = get_subarray_idx(user_page);
+    struct page *cache_page;
+    int ret = 0;
+    if (subarray_idx < 0)
+        return -EINVAL;
+    cache_page = find_get_page(mapping, index);
+    if (cache_page) {
+        if (get_subarray_idx(cache_page) == subarray_idx) {
+            rowclone_inc_write();
+            trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
+            put_page(cache_page);
+            return 0;
+        }
+		if (page_mapped(cache_page)) {
+            put_page(cache_page);
+            return 0; 
+        }
+        ret = isolate_lru_page(cache_page);
+        put_page(cache_page);
+        if (ret == 0) {
+            LIST_HEAD(page_list);
+            list_add_tail(&cache_page->lru, &page_list);
+            ret = migrate_pages(&page_list, alloc_same_subarray, NULL,
+                                (unsigned long)subarray_idx,
+                                MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
+            if (ret != 0) {
+                putback_movable_pages(&page_list);
+            } else {
+                rowclone_inc_write();
+                trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
+            }
+        }
+    } else {
+        struct page *new_page = alloc_same_subarray(NULL, subarray_idx);
+        if (!new_page)
+            return -ENOMEM;
+        ret = add_to_page_cache_lru(new_page, mapping, index, GFP_KERNEL);
+        if (ret) {
+            free_unref_page(new_page);
+            return ret;
+        }
+        unlock_page(new_page);
+        put_page(new_page);
+    }
+    return ret;
 }
+#endif
+#ifdef CONFIG_ZONE_LAR
+#include <linux/percpu.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
+struct rowclone_stats {
+    unsigned long read_count;
+    unsigned long write_count;
+    unsigned long aligned_read_count;
+    unsigned long aligned_write_count;
+    unsigned long rowclone_read_count;
+    unsigned long rowclone_write_count;
+};
+static DEFINE_PER_CPU(struct rowclone_stats, rowclone_stats_pcpu);
+
+void rowclone_inc_read(void)
+{
+    this_cpu_inc(rowclone_stats_pcpu.rowclone_read_count);
+}
+EXPORT_SYMBOL(rowclone_inc_read);
+
+void rowclone_inc_write(void)
+{
+    this_cpu_inc(rowclone_stats_pcpu.rowclone_write_count);
+}
+EXPORT_SYMBOL(rowclone_inc_write);
+
+void inc_read(void)
+{
+    this_cpu_inc(rowclone_stats_pcpu.read_count);
+}
+EXPORT_SYMBOL(inc_read);
+
+void inc_write(void)
+{
+    this_cpu_inc(rowclone_stats_pcpu.write_count);
+}
+EXPORT_SYMBOL(inc_write);
+
+void aligned_inc_read(void)
+{
+    this_cpu_inc(rowclone_stats_pcpu.aligned_read_count);
+}
+EXPORT_SYMBOL(aligned_inc_read);
+
+void aligned_inc_write(void)
+{
+    this_cpu_inc(rowclone_stats_pcpu.aligned_write_count);
+}
+EXPORT_SYMBOL(aligned_inc_write);
+
+static int rowclone_proc_show(struct seq_file *m, void *v)
+{
+    struct rowclone_stats total = {0};
+    int cpu;
+    for_each_possible_cpu(cpu) {
+        struct rowclone_stats *s = &per_cpu(rowclone_stats_pcpu, cpu);
+        
+        total.read_count           += s->read_count;
+        total.write_count          += s->write_count;
+        total.aligned_read_count   += s->aligned_read_count;
+        total.aligned_write_count  += s->aligned_write_count;
+        total.rowclone_read_count  += s->rowclone_read_count;
+        total.rowclone_write_count += s->rowclone_write_count;
+    }
+    seq_printf(m, "=== BASELINE METRICS ===\n");
+    seq_printf(m, "Read count:  %lu\n", total.read_count);
+    seq_printf(m, "Write count: %lu\n", total.write_count);
+    seq_printf(m, "=== ALIGNEMENT METRICS ===\n");
+    seq_printf(m, "Read count:  %lu\n", total.aligned_read_count);
+    seq_printf(m, "Write count: %lu\n", total.aligned_write_count);
+    seq_printf(m, "=== ROWCLONE METRICS ===\n");
+    seq_printf(m, "Read count:  %lu\n", total.rowclone_read_count);
+    seq_printf(m, "Write count: %lu\n", total.rowclone_write_count);
+    return 0;
+}
+
+static int rowclone_proc_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, rowclone_proc_show, NULL);
+}
+
+static ssize_t rowclone_proc_write(struct file *file, const char __user *buffer,
+                                   size_t count, loff_t *ppos)
+{
+    int cpu;
+    for_each_possible_cpu(cpu) {
+        struct rowclone_stats *s = &per_cpu(rowclone_stats_pcpu, cpu);
+        memset(s, 0, sizeof(*s));
+    }
+    return count;
+}
+
+static const struct proc_ops rowclone_proc_ops = {
+    .proc_open    = rowclone_proc_open,
+    .proc_read    = seq_read,
+    .proc_write   = rowclone_proc_write,
+    .proc_lseek   = seq_lseek,
+    .proc_release = single_release,
+};
+
+static int __init rowclone_init_procfs(void)
+{
+    struct proc_dir_entry *entry = proc_create("rowclone_stats", 0666, NULL, &rowclone_proc_ops);
+    if (!entry)
+        pr_err("ROWCLONE: Échec création /proc/rowclone_stats\n");
+    return 0;
+}
+subsys_initcall(rowclone_init_procfs);
 #endif

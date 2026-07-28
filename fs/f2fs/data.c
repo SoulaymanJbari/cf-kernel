@@ -3738,7 +3738,7 @@ int f2fs_migrate_page(struct address_space *mapping,
 	if (atomic_written) {
 		if (mode != MIGRATE_SYNC)
 			return -EBUSY;
-		if (!mutex_trylock(&fi->inmem_lock) && mode != MIGRATE_SYNC_NO_COPY_NO_LOCK)
+		if (!mutex_trylock(&fi->inmem_lock))
 			return -EAGAIN;
 	}
 
@@ -3760,9 +3760,8 @@ int f2fs_migrate_page(struct address_space *mapping,
 				cur->page = newpage;
 				break;
 			}
-		if (mode != MIGRATE_SYNC_NO_COPY_NO_LOCK) {
-			mutex_unlock(&fi->inmem_lock);
-		}
+
+		mutex_unlock(&fi->inmem_lock);
 		put_page(page);
 		get_page(newpage);
 	}
@@ -3779,7 +3778,7 @@ int f2fs_migrate_page(struct address_space *mapping,
 		put_page(page);
 	}
 
-	if (mode != MIGRATE_SYNC_NO_COPY && mode != MIGRATE_SYNC_NO_COPY_NO_LOCK)
+	if (mode != MIGRATE_SYNC_NO_COPY)
 		migrate_page_copy(newpage, page);
 	else
 		migrate_page_states(newpage, page);

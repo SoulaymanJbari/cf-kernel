@@ -3439,6 +3439,12 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 #ifdef CONFIG_ZONE_LAR
 bool is_uid_allowed(int uid);
 int remap_user_page(unsigned long user_vaddr, struct page* cache_page);
-int remap_kernel_page(struct page *user_page, struct page *cache_page);
+int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgoff_t index);
 int get_subarray_idx(struct page *page);
+void rowclone_inc_read(void);
+void rowclone_inc_write(void);
+void inc_read(void);
+void inc_write(void);
+void aligned_inc_read(void);
+void aligned_inc_write(void);
 #endif
