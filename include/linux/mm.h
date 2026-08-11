@@ -3433,18 +3433,38 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 }
 #endif
 
-#endif /* __KERNEL__ */
-#endif /* _LINUX_MM_H */
-
 #ifdef CONFIG_ZONE_LAR
-bool is_uid_allowed(int uid);
+enum rowclone_stat_type {
+    ROWCLONE_STAT_READ,
+    ROWCLONE_STAT_WRITE,
+
+    ROWCLONE_STAT_ALIGNED_READ,
+    ROWCLONE_STAT_ALIGNED_WRITE,
+
+    ROWCLONE_STAT_ROWCLONE_READ,
+    ROWCLONE_STAT_ROWCLONE_WRITE,
+
+    ROWCLONE_ERR_USER_FOLLOW_PAGE,
+    ROWCLONE_ERR_USER_ISOLATE_LRU,
+    ROWCLONE_ERR_USER_MIGRATION,
+
+    ROWCLONE_ERR_KERNEL_ISOLATE_LRU,
+    ROWCLONE_ERR_KERNEL_MIGRATION,
+    ROWCLONE_ERR_KERNEL_ALLOC,
+
+    NR_ROWCLONE_STATS
+};
+DECLARE_PER_CPU_ALIGNED(unsigned long[NR_ROWCLONE_STATS], rowclone_stats_pcpu);
+
+static inline void rowclone_inc_stat(enum rowclone_stat_type type)
+{
+    this_cpu_inc(rowclone_stats_pcpu[type]);
+}
+
 int remap_user_page(unsigned long user_vaddr, struct page* cache_page);
 int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgoff_t index);
 int get_subarray_idx(struct page *page);
-void rowclone_inc_read(void);
-void rowclone_inc_write(void);
-void inc_read(void);
-void inc_write(void);
-void aligned_inc_read(void);
-void aligned_inc_write(void);
 #endif
+
+#endif /* __KERNEL__ */
+#endif /* _LINUX_MM_H */

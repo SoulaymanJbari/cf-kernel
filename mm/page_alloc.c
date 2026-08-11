@@ -86,11 +86,6 @@
 #define PAGE_PROT_BITS (PTE_VALID | PTE_WRITE | PTE_USER | PTE_PXN | PTE_UXN)
 #include <trace/events/rowclone.h>
 extern unsigned long lar_zone_start_pfn;
-
-bool is_uid_allowed(int uid)
-{
-	return uid >= 10000;
-}
 #endif
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
@@ -5403,16 +5398,20 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	if (zone_page_state(lar_zone, NR_FREE_PAGES) <= wmark) {
 		wakeup_kswapd(lar_zone, gfp_mask, 0, ZONE_LAR);
 	}
-	start_idx = prandom_u32_max(lar_zone->num_subarrays);
+	spin_lock_irqsave(&lar_zone->rr_lock, flags);
+	start_idx = (lar_zone->rr_cursor + 1) % lar_zone->num_subarrays;
 	subarray_idx = find_next_zero_bit(lar_zone->full_subarrays_bitmap,
                                       lar_zone->num_subarrays,
                                       start_idx);
 	if (subarray_idx >= lar_zone->num_subarrays) {
 		subarray_idx = find_first_zero_bit(lar_zone->full_subarrays_bitmap, start_idx);
 		if (subarray_idx >= start_idx) {
+			spin_unlock_irqrestore(&lar_zone->rr_lock, flags);
             return NULL;
         }
 	}
+	lar_zone->rr_cursor = subarray_idx;
+	spin_unlock_irqrestore(&lar_zone->rr_lock, flags);
 	sa = &lar_zone->subarrays[subarray_idx];
 	spin_lock_irqsave(&sa->lock, flags);
 	if (sa->count > 0) {
@@ -7117,6 +7116,8 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 		end_pfn = start_pfn + size;
 		zone->zone_end_pfn = end_pfn;
 		zone->num_subarrays = size / SUBARRAY_PAGES;
+		spin_lock_init(&zone->rr_lock);
+		zone->rr_cursor = 0;
 		bitmap_fill(zone->full_subarrays_bitmap, zone->num_subarrays);
 
 		for (subarray_idx = 0; subarray_idx < zone->num_subarrays; subarray_idx++) {
@@ -9632,97 +9633,105 @@ bool has_managed_dma(void)
 #endif /* CONFIG_ZONE_DMA */
 
 #ifdef CONFIG_ZONE_LAR
+#include <linux/percpu.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
+DEFINE_PER_CPU_ALIGNED(unsigned long[NR_ROWCLONE_STATS], rowclone_stats_pcpu);
+EXPORT_PER_CPU_SYMBOL(rowclone_stats_pcpu);
 
 static struct page *alloc_same_subarray(struct page *old_page, 
-									unsigned long subarray_idx)
+                                    unsigned long subarray_idx)
 {
-	struct page *page;
-	struct zone *lar_zone;
-	struct subarray *sa;
-	unsigned long idx;
-	unsigned long flags;
-	lar_zone = &NODE_DATA(0)->node_zones[ZONE_LAR];
-	sa = &lar_zone->subarrays[subarray_idx];
-	spin_lock_irqsave(&sa->lock, flags);
-	if (sa->count > 0) {
-		idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
-		if (idx < SUBARRAY_PAGES) {
-			__set_bit(idx, sa->bitmap);
-			page = pfn_to_page(sa->start_pfn + idx);
-			sa->count--;
-			if (sa->count == 0) {
+    struct page *page;
+    struct zone *lar_zone;
+    struct subarray *sa;
+    unsigned long idx;
+    unsigned long flags;
+    lar_zone = &NODE_DATA(0)->node_zones[ZONE_LAR];
+    sa = &lar_zone->subarrays[subarray_idx];
+    spin_lock_irqsave(&sa->lock, flags);
+    if (sa->count > 0) {
+        idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
+        if (idx < SUBARRAY_PAGES) {
+            __set_bit(idx, sa->bitmap);
+            page = pfn_to_page(sa->start_pfn + idx);
+            sa->count--;
+            if (sa->count == 0) {
                 set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
             }
-			spin_unlock_irqrestore(&sa->lock, flags);
-			__mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
-			ClearPageReserved(page);
-			post_alloc_hook(page, 0, GFP_HIGHUSER_MOVABLE);
-			return page;
-		}
-	}
-	if (sa->count == 0) {
+            spin_unlock_irqrestore(&sa->lock, flags);
+            __mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
+            ClearPageReserved(page);
+            post_alloc_hook(page, 0, GFP_HIGHUSER_MOVABLE);
+            return page;
+        }
+    }
+    if (sa->count == 0) {
         set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
     }
-	spin_unlock_irqrestore(&sa->lock, flags);
-	return NULL;
+    spin_unlock_irqrestore(&sa->lock, flags);
+    return NULL;
 }
 
 int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
 {
-	int ret = 0;
-	struct list_head list;
-	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
-	struct page *page;
-	phys_addr_t user_paddr;
-	int subarray_idx = get_subarray_idx(cache_page);
-	if (subarray_idx < 0) {
-		return -EINVAL;
-	}
-	mmap_read_lock(mm);
-	vma = find_vma(mm, untagged_addr(user_vaddr));
-	if (!vma || user_vaddr < vma->vm_start) {
-		mmap_read_unlock(mm);
-		return -EINVAL;
-	}
-	page = follow_page(vma, user_vaddr, 0);
-	if (page && !IS_ERR(page) && subarray_idx == get_subarray_idx(page)) {
-		user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
-		mmap_read_unlock(mm);
-		rowclone_inc_read();
-		trace_rowclone_read(page_to_phys(cache_page), user_paddr);
-		return 0;
-	}
-	mmap_read_unlock(mm);
-	if (!page || IS_ERR(page)) {
-		return -EINVAL;
-	}
-	ret = isolate_lru_page(page);
-	if (ret) {
-		lru_add_drain();
-		ret = isolate_lru_page(page);
-		if (ret) {
-			return ret;
-		}
-	}
-	INIT_LIST_HEAD(&list);
-	list_add_tail(&page->lru, &list);
+    int ret = 0;
+    struct list_head list;
+    struct mm_struct *mm = current->mm;
+    struct vm_area_struct *vma;
+    struct page *page;
+    phys_addr_t user_paddr;
+    int subarray_idx = get_subarray_idx(cache_page);
+    if (subarray_idx < 0) {
+        return -EINVAL;
+    }
+    mmap_read_lock(mm);
+    vma = find_vma(mm, untagged_addr(user_vaddr));
+    if (!vma || user_vaddr < vma->vm_start) {
+        mmap_read_unlock(mm);
+        return -EINVAL;
+    }
+    page = follow_page(vma, user_vaddr, 0);
+    if (page && !IS_ERR(page) && subarray_idx == get_subarray_idx(page)) {
+        user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
+        mmap_read_unlock(mm);
+        rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_READ);
+        //trace_rowclone_read(page_to_phys(cache_page), user_paddr);
+        return 0;
+    }
+    mmap_read_unlock(mm);
+    if (!page || IS_ERR(page)) {
+        rowclone_inc_stat(ROWCLONE_ERR_USER_FOLLOW_PAGE);
+        return -EINVAL;
+    }
+    ret = isolate_lru_page(page);
+    if (ret) {
+        lru_add_drain();
+        ret = isolate_lru_page(page);
+        if (ret) {
+            return ret;
+        }
+    }
+    INIT_LIST_HEAD(&list);
+    list_add_tail(&page->lru, &list);
 
-	ret = migrate_pages(&list, alloc_same_subarray, NULL,
-		(unsigned long)subarray_idx, MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
-	if (ret == 0) {
-		mmap_read_lock(mm);
-		page = follow_page(vma, user_vaddr, 0);
-		if (page && !IS_ERR(page)) {
-			user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
-			rowclone_inc_read();
-			trace_rowclone_read(page_to_phys(cache_page), user_paddr);
-		}
-		mmap_read_unlock(mm);
-	} else {
-		putback_movable_pages(&list);
-	}
-	return ret;
+    ret = migrate_pages(&list, alloc_same_subarray, NULL,
+        (unsigned long)subarray_idx, MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
+    if (ret == 0) {
+        mmap_read_lock(mm);
+        page = follow_page(vma, user_vaddr, 0);
+        if (page && !IS_ERR(page)) {
+            user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
+            rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_READ);
+            //trace_rowclone_read(page_to_phys(cache_page), user_paddr);
+        }
+        mmap_read_unlock(mm);
+    } else {
+        putback_movable_pages(&list);
+        rowclone_inc_stat(ROWCLONE_ERR_USER_MIGRATION);
+    }
+    return ret;
 }
 
 int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgoff_t index)
@@ -9730,17 +9739,18 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
     int subarray_idx = get_subarray_idx(user_page);
     struct page *cache_page;
     int ret = 0;
-    if (subarray_idx < 0)
+    if (subarray_idx < 0) {
         return -EINVAL;
+    }
     cache_page = find_get_page(mapping, index);
     if (cache_page) {
         if (get_subarray_idx(cache_page) == subarray_idx) {
-            rowclone_inc_write();
-            trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
+            rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
+            //trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
             put_page(cache_page);
             return 0;
         }
-		if (page_mapped(cache_page)) {
+        if (page_mapped(cache_page)) {
             put_page(cache_page);
             return 0; 
         }
@@ -9754,100 +9764,65 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
                                 MIGRATE_SYNC_NO_COPY, MR_SYSCALL);
             if (ret != 0) {
                 putback_movable_pages(&page_list);
+                rowclone_inc_stat(ROWCLONE_ERR_KERNEL_MIGRATION);
             } else {
-                rowclone_inc_write();
-                trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
+                rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
+                //trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
             }
+        } else {
+            rowclone_inc_stat(ROWCLONE_ERR_KERNEL_ISOLATE_LRU);
         }
     } else {
         struct page *new_page = alloc_same_subarray(NULL, subarray_idx);
-        if (!new_page)
+        if (!new_page) {
+            rowclone_inc_stat(ROWCLONE_ERR_KERNEL_ALLOC);
             return -ENOMEM;
+        }
         ret = add_to_page_cache_lru(new_page, mapping, index, GFP_KERNEL);
         if (ret) {
             free_unref_page(new_page);
             return ret;
         }
+        rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
         unlock_page(new_page);
         put_page(new_page);
     }
     return ret;
 }
-#endif
-#ifdef CONFIG_ZONE_LAR
-#include <linux/percpu.h>
-#include <linux/proc_fs.h>
-#include <linux/seq_file.h>
-
-struct rowclone_stats {
-    unsigned long read_count;
-    unsigned long write_count;
-    unsigned long aligned_read_count;
-    unsigned long aligned_write_count;
-    unsigned long rowclone_read_count;
-    unsigned long rowclone_write_count;
-};
-static DEFINE_PER_CPU(struct rowclone_stats, rowclone_stats_pcpu);
-
-void rowclone_inc_read(void)
-{
-    this_cpu_inc(rowclone_stats_pcpu.rowclone_read_count);
-}
-EXPORT_SYMBOL(rowclone_inc_read);
-
-void rowclone_inc_write(void)
-{
-    this_cpu_inc(rowclone_stats_pcpu.rowclone_write_count);
-}
-EXPORT_SYMBOL(rowclone_inc_write);
-
-void inc_read(void)
-{
-    this_cpu_inc(rowclone_stats_pcpu.read_count);
-}
-EXPORT_SYMBOL(inc_read);
-
-void inc_write(void)
-{
-    this_cpu_inc(rowclone_stats_pcpu.write_count);
-}
-EXPORT_SYMBOL(inc_write);
-
-void aligned_inc_read(void)
-{
-    this_cpu_inc(rowclone_stats_pcpu.aligned_read_count);
-}
-EXPORT_SYMBOL(aligned_inc_read);
-
-void aligned_inc_write(void)
-{
-    this_cpu_inc(rowclone_stats_pcpu.aligned_write_count);
-}
-EXPORT_SYMBOL(aligned_inc_write);
 
 static int rowclone_proc_show(struct seq_file *m, void *v)
 {
-    struct rowclone_stats total = {0};
-    int cpu;
+    unsigned long total[NR_ROWCLONE_STATS] = {0};
+    int cpu, i;
+
     for_each_possible_cpu(cpu) {
-        struct rowclone_stats *s = &per_cpu(rowclone_stats_pcpu, cpu);
-        
-        total.read_count           += s->read_count;
-        total.write_count          += s->write_count;
-        total.aligned_read_count   += s->aligned_read_count;
-        total.aligned_write_count  += s->aligned_write_count;
-        total.rowclone_read_count  += s->rowclone_read_count;
-        total.rowclone_write_count += s->rowclone_write_count;
+        for (i = 0; i < NR_ROWCLONE_STATS; i++) {
+            total[i] += per_cpu(rowclone_stats_pcpu, cpu)[i];
+        }
     }
+
     seq_printf(m, "=== BASELINE METRICS ===\n");
-    seq_printf(m, "Read count:  %lu\n", total.read_count);
-    seq_printf(m, "Write count: %lu\n", total.write_count);
+    seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_READ]);
+    seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_WRITE]);
+
     seq_printf(m, "=== ALIGNEMENT METRICS ===\n");
-    seq_printf(m, "Read count:  %lu\n", total.aligned_read_count);
-    seq_printf(m, "Write count: %lu\n", total.aligned_write_count);
+    seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ALIGNED_READ]);
+    seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ALIGNED_WRITE]);
+
     seq_printf(m, "=== ROWCLONE METRICS ===\n");
-    seq_printf(m, "Read count:  %lu\n", total.rowclone_read_count);
-    seq_printf(m, "Write count: %lu\n", total.rowclone_write_count);
+    seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ROWCLONE_READ]);
+    seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ROWCLONE_WRITE]);
+
+    seq_printf(m, "=== REMAP USER FAILURES ===\n");
+    seq_printf(m, "Follow page err:  %lu\n", total[ROWCLONE_ERR_USER_FOLLOW_PAGE]);
+    seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_USER_ISOLATE_LRU]);
+    seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_USER_MIGRATION]);
+
+    seq_printf(m, "=== REMAP KERNEL FAILURES ===\n");
+    seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_KERNEL_ISOLATE_LRU]);
+    seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_KERNEL_MIGRATION]);
+    seq_printf(m, "Alloc sa err:     %lu\n", total[ROWCLONE_ERR_KERNEL_ALLOC]);
+    
     return 0;
 }
 
@@ -9861,8 +9836,7 @@ static ssize_t rowclone_proc_write(struct file *file, const char __user *buffer,
 {
     int cpu;
     for_each_possible_cpu(cpu) {
-        struct rowclone_stats *s = &per_cpu(rowclone_stats_pcpu, cpu);
-        memset(s, 0, sizeof(*s));
+        memset(per_cpu(rowclone_stats_pcpu, cpu), 0, sizeof(unsigned long) * NR_ROWCLONE_STATS);
     }
     return count;
 }

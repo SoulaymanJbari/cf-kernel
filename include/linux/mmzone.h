@@ -825,6 +825,8 @@ struct zone {
 	unsigned int num_subarrays;
 	unsigned long zone_end_pfn;
 	DECLARE_BITMAP(full_subarrays_bitmap, 4096);
+	spinlock_t rr_lock;
+	unsigned int rr_cursor;
 	ANDROID_KABI_RESERVE(1);
 #else
 

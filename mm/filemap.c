@@ -2358,10 +2358,12 @@ page_ok:
 				to_copy = iter->count;
 			}
 			to_copy = min(to_copy, iter->iov->iov_len - iter->iov_offset);
-			inc_read();
-			if (to_copy == 4096 && ((user_virt_addr) & (~PAGE_MASK)) == 0) {
-				aligned_inc_read();
-				remap_user_page(user_virt_addr, page);
+			if (to_copy == 4096) {
+				rowclone_inc_stat(ROWCLONE_STAT_READ);
+				if (((user_virt_addr) & (~PAGE_MASK)) == 0) {
+					rowclone_inc_stat(ROWCLONE_STAT_ALIGNED_READ);
+					remap_user_page(user_virt_addr, page);
+				}
 			}
 		} 
 		ret = copy_page_to_iter(page, offset, nr, iter);
@@ -3520,11 +3522,11 @@ again:
 
 		if (current->mm && current->cred->uid.val >= 10000 && bytes == 4096) {
 			uintptr_t user_virt_addr = (uintptr_t)i->iov->iov_base + i->iov_offset;
-			inc_write();
+			rowclone_inc_stat(ROWCLONE_STAT_WRITE);
 			if ((user_virt_addr & (~PAGE_MASK)) == 0) {
 				struct page *user_page_ptr = NULL;
 				int npages = get_user_pages_fast(user_virt_addr, 1, 0, &user_page_ptr);
-				aligned_inc_write();
+				rowclone_inc_stat(ROWCLONE_STAT_ALIGNED_WRITE);
 				if (npages > 0) {
 					pgoff_t index = pos >> PAGE_SHIFT;
 					remap_kernel_page(user_page_ptr, mapping, index);
