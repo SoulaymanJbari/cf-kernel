@@ -1043,7 +1043,7 @@ void free_lar_page(struct page *page)
 	spin_lock_irqsave(&sa->lock, flags);
 	__clear_bit(idx, sa->bitmap);
 	sa->count++;
-	if (sa->count == 1) {
+	if (sa->count == 17) {
         clear_bit(subarray_idx, zone->full_subarrays_bitmap);
     }
 	spin_unlock_irqrestore(&sa->lock, flags);
@@ -5406,13 +5406,13 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	spin_unlock_irqrestore(&lar_zone->rr_lock, flags);
 	sa = &lar_zone->subarrays[subarray_idx];
 	spin_lock_irqsave(&sa->lock, flags);
-	if (sa->count > 0) {
+	if (sa->count > 16) {
 		idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
 		if (idx < SUBARRAY_PAGES) {
 			__set_bit(idx, sa->bitmap);
 			page = pfn_to_page(sa->start_pfn + idx);
 			sa->count--;
-			if (sa->count == 0) {
+			if (sa->count == 16) {
 				set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
 			}
 			spin_unlock_irqrestore(&sa->lock, flags);
@@ -5423,7 +5423,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 
 		}
 	}
-	if (sa->count == 0) {
+	if (sa->count == 16) {
         set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
     }
     spin_unlock_irqrestore(&sa->lock, flags);
@@ -9646,18 +9646,12 @@ static struct page *alloc_same_subarray(struct page *old_page,
             __set_bit(idx, sa->bitmap);
             page = pfn_to_page(sa->start_pfn + idx);
             sa->count--;
-            if (sa->count == 0) {
-                set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
-            }
             spin_unlock_irqrestore(&sa->lock, flags);
             __mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
             ClearPageReserved(page);
             post_alloc_hook(page, 0, GFP_HIGHUSER_MOVABLE);
             return page;
         }
-    }
-    if (sa->count == 0) {
-        set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
     }
     spin_unlock_irqrestore(&sa->lock, flags);
     return NULL;
