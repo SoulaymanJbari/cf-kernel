@@ -84,7 +84,6 @@
 #ifdef CONFIG_ZONE_LAR
 #include <asm/pgtable.h>
 #define PAGE_PROT_BITS (PTE_VALID | PTE_WRITE | PTE_USER | PTE_PXN | PTE_UXN)
-#include <trace/events/rowclone.h>
 extern unsigned long lar_zone_start_pfn;
 #endif
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
@@ -9640,6 +9639,9 @@ bool has_managed_dma(void)
 DEFINE_PER_CPU_ALIGNED(unsigned long[NR_ROWCLONE_STATS], rowclone_stats_pcpu);
 EXPORT_PER_CPU_SYMBOL(rowclone_stats_pcpu);
 
+DEFINE_PER_CPU_ALIGNED(struct rowclone_ring, rowclone_rings);
+EXPORT_PER_CPU_SYMBOL(rowclone_rings);
+
 static struct page *alloc_same_subarray(struct page *old_page, 
                                     unsigned long subarray_idx)
 {
@@ -9684,12 +9686,14 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
     phys_addr_t user_paddr;
     int subarray_idx = get_subarray_idx(cache_page);
     if (subarray_idx < 0) {
+		rowclone_inc_stat(ROWCLONE_ERR_USER_INVALID_SUBARRAY);
         return -EINVAL;
     }
     mmap_read_lock(mm);
     vma = find_vma(mm, untagged_addr(user_vaddr));
     if (!vma || user_vaddr < vma->vm_start) {
         mmap_read_unlock(mm);
+		rowclone_inc_stat(ROWCLONE_ERR_USER_VMA_NOT_FOUND);
         return -EINVAL;
     }
     page = follow_page(vma, user_vaddr, 0);
@@ -9697,7 +9701,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
         user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
         mmap_read_unlock(mm);
         rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_READ);
-        //trace_rowclone_read(page_to_phys(cache_page), user_paddr);
+        log_rowclone_fast(page_to_phys(cache_page), user_paddr);
         return 0;
     }
     mmap_read_unlock(mm);
@@ -9710,6 +9714,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
         lru_add_drain();
         ret = isolate_lru_page(page);
         if (ret) {
+			rowclone_inc_stat(ROWCLONE_ERR_USER_ISOLATE_LRU);
             return ret;
         }
     }
@@ -9724,7 +9729,7 @@ int remap_user_page(unsigned long user_vaddr, struct page *cache_page)
         if (page && !IS_ERR(page)) {
             user_paddr = page_to_phys(page) + (user_vaddr & ~PAGE_MASK);
             rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_READ);
-            //trace_rowclone_read(page_to_phys(cache_page), user_paddr);
+            log_rowclone_fast(page_to_phys(cache_page), user_paddr);
         }
         mmap_read_unlock(mm);
     } else {
@@ -9740,17 +9745,19 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
     struct page *cache_page;
     int ret = 0;
     if (subarray_idx < 0) {
+		rowclone_inc_stat(ROWCLONE_ERR_KERNEL_INVALID_SUBARRAY);
         return -EINVAL;
     }
     cache_page = find_get_page(mapping, index);
     if (cache_page) {
         if (get_subarray_idx(cache_page) == subarray_idx) {
             rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
-            //trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
+            log_rowclone_fast(page_to_phys(user_page), page_to_phys(cache_page));
             put_page(cache_page);
             return 0;
         }
         if (page_mapped(cache_page)) {
+			rowclone_inc_stat(ROWCLONE_ERR_KERNEL_PAGE_MAPPED);
             put_page(cache_page);
             return 0; 
         }
@@ -9767,7 +9774,7 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
                 rowclone_inc_stat(ROWCLONE_ERR_KERNEL_MIGRATION);
             } else {
                 rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
-                //trace_rowclone_write(page_to_phys(user_page), page_to_phys(cache_page));
+                log_rowclone_fast(page_to_phys(user_page), page_to_phys(cache_page));
             }
         } else {
             rowclone_inc_stat(ROWCLONE_ERR_KERNEL_ISOLATE_LRU);
@@ -9781,9 +9788,11 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
         ret = add_to_page_cache_lru(new_page, mapping, index, GFP_KERNEL);
         if (ret) {
             free_unref_page(new_page);
+			rowclone_inc_stat(ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE);
             return ret;
         }
         rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
+		log_rowclone_fast(page_to_phys(user_page), page_to_phys(cache_page));
         unlock_page(new_page);
         put_page(new_page);
     }
@@ -9814,14 +9823,19 @@ static int rowclone_proc_show(struct seq_file *m, void *v)
     seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ROWCLONE_WRITE]);
 
     seq_printf(m, "=== REMAP USER FAILURES ===\n");
+	seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_USER_INVALID_SUBARRAY]);
+    seq_printf(m, "VMA not found:    %lu\n", total[ROWCLONE_ERR_USER_VMA_NOT_FOUND]);
     seq_printf(m, "Follow page err:  %lu\n", total[ROWCLONE_ERR_USER_FOLLOW_PAGE]);
     seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_USER_ISOLATE_LRU]);
     seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_USER_MIGRATION]);
 
     seq_printf(m, "=== REMAP KERNEL FAILURES ===\n");
+	seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_KERNEL_INVALID_SUBARRAY]);
+    seq_printf(m, "Page mapped err:  %lu\n", total[ROWCLONE_ERR_KERNEL_PAGE_MAPPED]);
     seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_KERNEL_ISOLATE_LRU]);
     seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_KERNEL_MIGRATION]);
     seq_printf(m, "Alloc sa err:     %lu\n", total[ROWCLONE_ERR_KERNEL_ALLOC]);
+	seq_printf(m, "Add pagecache err:%lu\n", total[ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE]);
     
     return 0;
 }
@@ -9849,11 +9863,57 @@ static const struct proc_ops rowclone_proc_ops = {
     .proc_release = single_release,
 };
 
+static int rowclone_ring_proc_show(struct seq_file *m, void *v)
+{
+    int cpu;
+    unsigned int i, count;
+
+    seq_printf(m, "# CPU | SRC_PHYS_ADDR | DST_PHYS_ADDR\n");
+
+    for_each_possible_cpu(cpu) {
+        struct rowclone_ring *ring = &per_cpu(rowclone_rings, cpu);
+        count = min_t(unsigned int, ring->head, RC_RING_SIZE);
+        
+        for (i = 0; i < count; i++) {
+            seq_printf(m, "%d 0x%lx 0x%lx\n",
+                       cpu,
+                       ring->entries[i].src,
+                       ring->entries[i].dst);
+        }
+    }
+    return 0;
+}
+
+static int rowclone_ring_proc_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, rowclone_ring_proc_show, NULL);
+}
+
+static ssize_t rowclone_ring_proc_write(struct file *file, const char __user *buffer,
+                                        size_t count, loff_t *ppos)
+{
+    int cpu;
+
+    for_each_possible_cpu(cpu) {
+        struct rowclone_ring *ring = &per_cpu(rowclone_rings, cpu);
+        ring->head = 0;
+        memset(ring->entries, 0, sizeof(ring->entries));
+    }
+    return count;
+}
+
+static const struct proc_ops rowclone_ring_proc_ops = {
+    .proc_open    = rowclone_ring_proc_open,
+    .proc_read    = seq_read,
+    .proc_write   = rowclone_ring_proc_write,
+    .proc_lseek   = seq_lseek,
+    .proc_release = single_release,
+};
+
 static int __init rowclone_init_procfs(void)
 {
-    struct proc_dir_entry *entry = proc_create("rowclone_stats", 0666, NULL, &rowclone_proc_ops);
-    if (!entry)
-        pr_err("ROWCLONE: Échec création /proc/rowclone_stats\n");
+    proc_create("rowclone_stats", 0666, NULL, &rowclone_proc_ops);
+    proc_create("rowclone_ring", 0666, NULL, &rowclone_ring_proc_ops);
     return 0;
 }
 subsys_initcall(rowclone_init_procfs);

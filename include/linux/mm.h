@@ -3434,6 +3434,29 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 #endif
 
 #ifdef CONFIG_ZONE_LAR
+#define RC_RING_SIZE 32768 /* Doit être une puissance de 2 */
+
+struct rowclone_entry {
+    unsigned long src;
+    unsigned long dst;
+};
+
+struct rowclone_ring {
+    struct rowclone_entry entries[RC_RING_SIZE];
+    unsigned int head;
+};
+
+DECLARE_PER_CPU_ALIGNED(struct rowclone_ring, rowclone_rings);
+
+static inline void log_rowclone_fast(unsigned long src, unsigned long dst)
+{
+    struct rowclone_ring *ring = this_cpu_ptr(&rowclone_rings);
+    unsigned int idx = ring->head++ & (RC_RING_SIZE - 1);
+
+    ring->entries[idx].src = src;
+    ring->entries[idx].dst = dst;
+}
+
 enum rowclone_stat_type {
     ROWCLONE_STAT_READ,
     ROWCLONE_STAT_WRITE,
@@ -3444,13 +3467,18 @@ enum rowclone_stat_type {
     ROWCLONE_STAT_ROWCLONE_READ,
     ROWCLONE_STAT_ROWCLONE_WRITE,
 
+	ROWCLONE_ERR_USER_INVALID_SUBARRAY,
+    ROWCLONE_ERR_USER_VMA_NOT_FOUND,
     ROWCLONE_ERR_USER_FOLLOW_PAGE,
     ROWCLONE_ERR_USER_ISOLATE_LRU,
     ROWCLONE_ERR_USER_MIGRATION,
 
+	ROWCLONE_ERR_KERNEL_INVALID_SUBARRAY,
+    ROWCLONE_ERR_KERNEL_PAGE_MAPPED,
     ROWCLONE_ERR_KERNEL_ISOLATE_LRU,
     ROWCLONE_ERR_KERNEL_MIGRATION,
     ROWCLONE_ERR_KERNEL_ALLOC,
+	ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE,
 
     NR_ROWCLONE_STATS
 };
