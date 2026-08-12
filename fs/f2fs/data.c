@@ -3760,7 +3760,6 @@ int f2fs_migrate_page(struct address_space *mapping,
 				cur->page = newpage;
 				break;
 			}
-
 		mutex_unlock(&fi->inmem_lock);
 		put_page(page);
 		get_page(newpage);

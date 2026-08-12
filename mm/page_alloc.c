@@ -72,8 +72,6 @@
 #include <linux/padata.h>
 #include <linux/khugepaged.h>
 #include <trace/hooks/mm.h>
-#include <linux/rmap.h>
-#include <linux/prandom.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -81,11 +79,6 @@
 #include "internal.h"
 #include "shuffle.h"
 #include "page_reporting.h"
-#ifdef CONFIG_ZONE_LAR
-#include <asm/pgtable.h>
-#define PAGE_PROT_BITS (PTE_VALID | PTE_WRITE | PTE_USER | PTE_PXN | PTE_UXN)
-extern unsigned long lar_zone_start_pfn;
-#endif
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
 
@@ -5455,8 +5448,6 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 		page = alloc_lar_page(gfp_mask, preferred_nid);
 		if (page) {
 			return page;
-		} else {
-			printk(KERN_WARNING "[yb] OOM: fallback to normal zone!\n");
 		}
 	}
 #endif
@@ -5483,12 +5474,8 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
-	if (likely(page)) {
-		if (page_to_pfn(page) > 3145728ul) {
-			printk(KERN_INFO "DANGER: allocated page from lar: %px", page_to_phys(page));
-		}
+	if (likely(page))
 		goto out;
-	}
 
 	/*
 	 * Apply scoped allocation constraints. This is mainly about GFP_NOFS
@@ -9792,7 +9779,7 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
             return ret;
         }
         rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
-		log_rowclone_fast(page_to_phys(user_page), page_to_phys(cache_page));
+		log_rowclone_fast(page_to_phys(user_page), page_to_phys(new_page));
         unlock_page(new_page);
         put_page(new_page);
     }
