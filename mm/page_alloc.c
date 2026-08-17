@@ -1026,7 +1026,7 @@ int get_subarray_idx(struct page *page)
 	struct zone *zone = page_zone(page);
 	if (zone_idx(zone) != ZONE_LAR)
 		return -1;
-	return page_to_pfn(page) / 512 - (zone->zone_start_pfn / 512);
+	return lar_pfn_to_subarray_idx(page_to_pfn(page));
 }
 
 void free_lar_page(struct page *page) 
@@ -1036,12 +1036,12 @@ void free_lar_page(struct page *page)
 	struct zone *zone = page_zone(page);
 	struct subarray *sa;
 	int subarray_idx;
-	unsigned long idx;
+	unsigned long row_idx;
 	subarray_idx = get_subarray_idx(page);
 	sa = &zone->subarrays[subarray_idx];
-	idx = pfn & 511;
+	row_idx = lar_pfn_to_row_idx(pfn);
 	spin_lock_irqsave(&sa->lock, flags);
-	__clear_bit(idx, sa->bitmap);
+	__clear_bit(row_idx, sa->bitmap);
 	sa->count++;
 	if (sa->count == 17) {
         clear_bit(subarray_idx, zone->full_subarrays_bitmap);
@@ -3437,11 +3437,10 @@ void free_unref_page(struct page *page)
 		return;
 #ifdef CONFIG_ZONE_LAR
 	zone = page_zone(page);
-	if (strcmp(zone->name, "LAR") != 0)
-		goto origin;
-	free_lar_page(page);
-	return;
-origin:
+	if (zone_idx(zone) == ZONE_LAR) {
+		free_lar_page(page);
+		return;
+	}
 #endif
 
 	/*
@@ -3501,7 +3500,7 @@ void free_unref_page_list(struct list_head *list)
 			continue;
 		}
 #ifdef CONFIG_ZONE_LAR
-		if (strcmp(zone->name, "LAR") == 0) {
+		if (zone_idx(zone) == ZONE_LAR) {
 			list_del(&page->lru);
 			free_lar_page(page);
 			continue;
@@ -5381,7 +5380,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	struct page *page;
 	struct zone *lar_zone;
 	struct subarray *sa;
-	unsigned long start_idx, subarray_idx, idx;
+	unsigned long start_idx, subarray_idx, row_idx;
 	unsigned long flags;
 	unsigned long wmark;
 
@@ -5407,15 +5406,17 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	sa = &lar_zone->subarrays[subarray_idx];
 	spin_lock_irqsave(&sa->lock, flags);
 	if (sa->count > 16) {
-		idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
-		if (idx < SUBARRAY_PAGES) {
-			__set_bit(idx, sa->bitmap);
-			page = pfn_to_page(sa->start_pfn + idx);
+		row_idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
+		if (row_idx < SUBARRAY_PAGES) {
+			unsigned long pfn;
+			__set_bit(row_idx, sa->bitmap);
 			sa->count--;
 			if (sa->count == 16) {
 				set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
 			}
 			spin_unlock_irqrestore(&sa->lock, flags);
+			pfn = lar_sub_row_to_pfn(subarray_idx, row_idx);
+			page = pfn_to_page(pfn);
 			__mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
 			ClearPageReserved(page);
 			post_alloc_hook(page, 0, gfp_mask);
@@ -7093,32 +7094,22 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 
 	zone->zone_start_pfn = zone_start_pfn;
 #ifdef CONFIG_ZONE_LAR
-	if (strcmp(zone->name, "LAR") == 0) {
-		unsigned int subarray_idx;
-		unsigned long start_pfn, end_pfn;
+	if (zone_idx(zone) == ZONE_LAR) {
+		unsigned int sa_idx;
 		struct subarray *sa;
 
-		start_pfn = zone->zone_start_pfn;
-		end_pfn = start_pfn + size;
-		zone->zone_end_pfn = end_pfn;
+		zone->zone_end_pfn = zone->zone_start_pfn + size;
 		zone->num_subarrays = size / SUBARRAY_PAGES;
 		spin_lock_init(&zone->rr_lock);
 		zone->rr_cursor = 0;
 		bitmap_fill(zone->full_subarrays_bitmap, zone->num_subarrays);
 
-		for (subarray_idx = 0; subarray_idx < zone->num_subarrays; subarray_idx++) {
-			unsigned long subarray_start = start_pfn + (subarray_idx * SUBARRAY_PAGES);
-            unsigned long subarray_end = subarray_start + SUBARRAY_PAGES;
-
-			sa = &zone->subarrays[subarray_idx];
+		for (sa_idx = 0; sa_idx < zone->num_subarrays; sa_idx++) {
+			sa = &zone->subarrays[sa_idx];
 			bitmap_fill(sa->bitmap, SUBARRAY_PAGES);
 			sa->free_pages = NULL;
-			sa->start_pfn = subarray_start;
-			sa->end_pfn = subarray_end;
 			spin_lock_init(&sa->lock);
 			sa->count = 0;
-			pr_info("Subarray %u: PFN [%lu, %lu), Pages = %lu\n",
-					subarray_idx, sa->start_pfn, sa->end_pfn, sa->count);
 		}
 	}
 #endif
@@ -9635,18 +9626,20 @@ static struct page *alloc_same_subarray(struct page *old_page,
     struct page *page;
     struct zone *lar_zone;
     struct subarray *sa;
-    unsigned long idx;
+    unsigned long row_idx;
     unsigned long flags;
     lar_zone = &NODE_DATA(0)->node_zones[ZONE_LAR];
     sa = &lar_zone->subarrays[subarray_idx];
     spin_lock_irqsave(&sa->lock, flags);
     if (sa->count > 0) {
-        idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
-        if (idx < SUBARRAY_PAGES) {
-            __set_bit(idx, sa->bitmap);
-            page = pfn_to_page(sa->start_pfn + idx);
+        row_idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
+        if (row_idx < SUBARRAY_PAGES) {
+			unsigned long pfn;
+            __set_bit(row_idx, sa->bitmap);
             sa->count--;
             spin_unlock_irqrestore(&sa->lock, flags);
+			pfn = lar_sub_row_to_pfn(subarray_idx, row_idx);
+			page = pfn_to_page(pfn);
             __mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
             ClearPageReserved(page);
             post_alloc_hook(page, 0, GFP_HIGHUSER_MOVABLE);

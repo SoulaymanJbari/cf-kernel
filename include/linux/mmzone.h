@@ -33,18 +33,80 @@
 #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
 
 #ifdef CONFIG_ZONE_LAR
-#define SUBARRAY_SIZE (512 * PAGE_SIZE)  // 2MB
-#define SUBARRAY_PAGES 512
-#define SUBARRAY_SHIFT 21
-#define LAR_ZONE_PERCENT 80
+extern unsigned long lar_zone_start_pfn;
+#define LAR_MAP_ROBARACOCH 	1
+//#define LAR_MAP_CHRABAROCO 1
+
+#define SUBARRAY_PAGES 		512
+#define MAX_SUBARRAYS		4096
+#define LAR_ZONE_PERCENT 	80
+
+#define RA_BITS				1
+#define BA_BITS				4
+#define ROW_IN_SA_BITS		9
+#define SA_IN_BANK_BITS		7
+
+#if defined(LAR_MAP_ROBARACOCH)
+	#define RA_SHIFT_PA			(PAGE_SHIFT)
+	#define BA_SHIFT_PA			(RA_SHIFT_PA + RA_BITS)
+	#define ROW_IN_SA_SHIFT_PA 	(BA_SHIFT_PA + BA_BITS)
+	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
+	
+#elif defined(LAR_MAP_CHRABAROCO)
+	#define ROW_IN_SA_SHIFT_PA 	(PAGE_SHIFT)
+	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
+	#define BA_SHIFT_PA			(SA_IN_BANK_SHIFT_PA + SA_IN_BANK_BITS)
+	#define RA_SHIFT_PA			(BA_SHIFT_PA + BA_BITS)
+#endif
+
+#define LAR_ZONE_ALIGN_PA	(1UL << SA_IN_BANK_SHIFT_PA)
+#define LAR_ZONE_ALIGN_PFN 	(LAR_ZONE_ALIGN_PA >> PAGE_SHIFT)
+
 struct subarray {
 	spinlock_t lock;
     struct page *free_pages;
 	unsigned long bitmap[8];
    	unsigned int count;	//num of free pages in this subarray
-   	unsigned long start_pfn;
-   	unsigned long end_pfn;
 } ____cacheline_aligned;
+
+static inline int lar_pfn_to_subarray_idx(unsigned long pfn)
+{
+	unsigned long rel_pfn = pfn - lar_zone_start_pfn;
+	phys_addr_t pa = (phys_addr_t)rel_pfn << PAGE_SHIFT;
+#if defined(LAR_MAP_ROBARACOCH)
+	unsigned int ra = (pa >> RA_SHIFT_PA) & ((1 << RA_BITS) - 1);
+	unsigned int ba = (pa >> BA_SHIFT_PA) & ((1 << BA_BITS) - 1);
+	unsigned int sa_in_bank = (pa >> SA_IN_BANK_SHIFT_PA) & ((1 << SA_IN_BANK_BITS) - 1);
+	return (sa_in_bank << (BA_BITS + RA_BITS)) | (ba << RA_BITS) | ra;
+#elif defined(LAR_MAP_CHRABAROCO)
+	return (int)(pa >> SA_IN_BANK_SHIFT_PA);
+#endif
+}
+
+static inline unsigned int lar_pfn_to_row_idx(unsigned long pfn)
+{
+	unsigned long rel_pfn = pfn - lar_zone_start_pfn;
+	phys_addr_t pa = (phys_addr_t)rel_pfn << PAGE_SHIFT;
+	return (unsigned int)((pa >> ROW_IN_SA_SHIFT_PA) & ((1 << ROW_IN_SA_BITS) - 1));
+}
+
+static inline unsigned long lar_sub_row_to_pfn(unsigned int sa_idx, unsigned int row_idx)
+{
+#if defined(LAR_MAP_ROBARACOCH)
+	unsigned int ra = sa_idx & ((1 << RA_BITS) - 1);
+	unsigned ba = (sa_idx >> RA_BITS) & ((1 << BA_BITS) - 1);
+	unsigned int sa_in_bank = sa_idx >> (BA_BITS + RA_BITS);
+
+	phys_addr_t pa = 	((phys_addr_t)sa_in_bank << SA_IN_BANK_SHIFT_PA) 	|
+						((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA) 		|
+						((phys_addr_t)ba << BA_SHIFT_PA)					|
+						((phys_addr_t)ra << RA_SHIFT_PA);
+#elif defined(LAR_MAP_CHRABAROCO)
+	phys_addr_t pa = 	((phys_addr_t)sa_idx << SA_IN_BANK_SHIFT_PA) 		|
+						((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA);
+#endif
+	return lar_zone_start_pfn + (unsigned long)(pa >> PAGE_SHIFT);
+}
 #endif
 
 /*
@@ -821,10 +883,10 @@ struct zone {
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
 #ifdef CONFIG_ZONE_LAR
-	struct subarray subarrays[4096];
+	struct subarray subarrays[MAX_SUBARRAYS];
 	unsigned int num_subarrays;
 	unsigned long zone_end_pfn;
-	DECLARE_BITMAP(full_subarrays_bitmap, 4096);
+	DECLARE_BITMAP(full_subarrays_bitmap, MAX_SUBARRAYS);
 	spinlock_t rr_lock;
 	unsigned int rr_cursor;
 	ANDROID_KABI_RESERVE(1);
