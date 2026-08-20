@@ -7107,7 +7107,6 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 		for (sa_idx = 0; sa_idx < zone->num_subarrays; sa_idx++) {
 			sa = &zone->subarrays[sa_idx];
 			bitmap_fill(sa->bitmap, SUBARRAY_PAGES);
-			sa->free_pages = NULL;
 			spin_lock_init(&sa->lock);
 			sa->count = 0;
 		}

@@ -64,9 +64,8 @@ extern unsigned long lar_zone_start_pfn;
 
 struct subarray {
 	spinlock_t lock;
-    struct page *free_pages;
 	unsigned long bitmap[8];
-   	unsigned int count;	//num of free pages in this subarray
+   	unsigned int count;
 } ____cacheline_aligned;
 
 static inline int lar_pfn_to_subarray_idx(unsigned long pfn)
