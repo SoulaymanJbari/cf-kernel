@@ -56,6 +56,9 @@ index 0cbb63cf9..6cb82c96c 100644
  
  	free_area_init(max_zone_pfns);
  }
+diff --git a/diff b/diff
+new file mode 100644
+index 000000000..e69de29bb
 diff --git a/include/linux/mm.h b/include/linux/mm.h
 index 5a62bb880..e631a4255 100644
 --- a/include/linux/mm.h
@@ -128,7 +131,7 @@ index 5a62bb880..e631a4255 100644
  #endif /* __KERNEL__ */
  #endif /* _LINUX_MM_H */
 diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
-index 30757931d..9a6678b97 100644
+index 30757931d..57da492c3 100644
 --- a/include/linux/mmzone.h
 +++ b/include/linux/mmzone.h
 @@ -1,4 +1,5 @@
@@ -137,7 +140,7 @@ index 30757931d..9a6678b97 100644
  #ifndef _LINUX_MMZONE_H
  #define _LINUX_MMZONE_H
  
-@@ -31,6 +32,85 @@
+@@ -31,6 +32,82 @@
  #endif
  #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
  
@@ -150,15 +153,13 @@ index 30757931d..9a6678b97 100644
 +#define MAX_SUBARRAYS		4096
 +#define LAR_ZONE_PERCENT 	80
 +
-+#define TX_BITS				6
-+#define COL_BITS			4
 +#define RA_BITS				1
 +#define BA_BITS				4
 +#define ROW_IN_SA_BITS		9
 +#define SA_IN_BANK_BITS		7
 +
 +#if defined(LAR_MAP_ROBARACOCH)
-+	#define RA_SHIFT_PA			(TX_BITS + COL_BITS)
++	#define RA_SHIFT_PA			(PAGE_SHIFT)
 +	#define BA_SHIFT_PA			(RA_SHIFT_PA + RA_BITS)
 +	#define ROW_IN_SA_SHIFT_PA 	(BA_SHIFT_PA + BA_BITS)
 +	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
@@ -175,9 +176,8 @@ index 30757931d..9a6678b97 100644
 +
 +struct subarray {
 +	spinlock_t lock;
-+    struct page *free_pages;
 +	unsigned long bitmap[8];
-+   	unsigned int count;	//num of free pages in this subarray
++   	unsigned int count;
 +} ____cacheline_aligned;
 +
 +static inline int lar_pfn_to_subarray_idx(unsigned long pfn)
@@ -223,7 +223,7 @@ index 30757931d..9a6678b97 100644
  /*
   * PAGE_ALLOC_COSTLY_ORDER is the order at which allocations are deemed
   * costly to service.  That is between allocation orders which should
-@@ -589,6 +669,9 @@ enum zone_type {
+@@ -589,6 +666,9 @@ enum zone_type {
  	 * transfers to all addressable memory.
  	 */
  	ZONE_NORMAL,
@@ -233,7 +233,7 @@ index 30757931d..9a6678b97 100644
  #ifdef CONFIG_HIGHMEM
  	/*
  	 * A memory area that is only addressable by the kernel through
-@@ -801,11 +884,21 @@ struct zone {
+@@ -801,11 +881,21 @@ struct zone {
  	/* Zone statistics */
  	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
  	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
@@ -317,7 +317,7 @@ index 0d5b8322e..dd8ad080c 100644
  						page, fsdata);
  		if (unlikely(status < 0))
 diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index b823765dd..2ebb78dca 100644
+index b823765dd..964174db7 100644
 --- a/mm/page_alloc.c
 +++ b/mm/page_alloc.c
 @@ -79,7 +79,6 @@
@@ -552,7 +552,7 @@ index b823765dd..2ebb78dca 100644
  	for (pfn = start_pfn; pfn < end_pfn; ) {
  		/*
  		 * There can be holes in boot-time mem_map[]s handed to this
-@@ -6943,7 +7093,27 @@ void __meminit init_currently_empty_zone(struct zone *zone,
+@@ -6943,7 +7093,26 @@ void __meminit init_currently_empty_zone(struct zone *zone,
  		pgdat->nr_zones = zone_idx;
  
  	zone->zone_start_pfn = zone_start_pfn;
@@ -574,14 +574,13 @@ index b823765dd..2ebb78dca 100644
 +			sa->free_pages = NULL;
 +			spin_lock_init(&sa->lock);
 +			sa->count = 0;
-+			pr_info("Subarray %u: Free Pages = %u\n", sa_idx, sa->count);
 +		}
 +	}
 +#endif
  	mminit_dprintk(MMINIT_TRACE, "memmap_init",
  			"Initialising map node %d zone %lu pfns %lu -> %lu\n",
  			pgdat->node_id,
-@@ -7859,7 +8029,11 @@ static void check_for_memory(pg_data_t *pgdat, int nid)
+@@ -7859,7 +8028,11 @@ static void check_for_memory(pg_data_t *pgdat, int nid)
  		if (populated_zone(zone)) {
  			if (IS_ENABLED(CONFIG_HIGHMEM))
  				node_set_state(nid, N_HIGH_MEMORY);
@@ -593,7 +592,7 @@ index b823765dd..2ebb78dca 100644
  				node_set_state(nid, N_NORMAL_MEMORY);
  			break;
  		}
-@@ -9435,3 +9609,287 @@ bool has_managed_dma(void)
+@@ -9435,3 +9608,287 @@ bool has_managed_dma(void)
  	return false;
  }
  #endif /* CONFIG_ZONE_DMA */
