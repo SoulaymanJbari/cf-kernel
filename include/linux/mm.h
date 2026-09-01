@@ -3434,7 +3434,33 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 #endif
 
 #ifdef CONFIG_ZONE_LAR
-#define RC_RING_SIZE 32768 /* Doit être une puissance de 2 */
+#include <linux/ktime.h>
+#define RC_RING_SIZE 32768
+
+enum rc_timer_type {
+    RC_TIMER_RW_TOTAL,
+    RC_TIMER_RW_COPY,
+    NR_RC_TIMERS
+};
+
+extern bool rc_timer_running;
+DECLARE_PER_CPU(u64[NR_RC_TIMERS], rc_rw_time_ns);
+
+static inline ktime_t rc_measure_start(void)
+{
+    if (!READ_ONCE(rc_timer_running))
+        return 0;
+
+    return ktime_get();
+}
+
+static inline void rc_measure_end(ktime_t start, enum rc_timer_type type)
+{
+    if (!start)
+        return;
+
+    this_cpu_add(rc_rw_time_ns[type], ktime_to_ns(ktime_sub(ktime_get(), start)));
+}
 
 struct rowclone_entry {
     unsigned long src;

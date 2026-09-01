@@ -3413,6 +3413,7 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	__releases(vmf->ptl)
 {
 	struct vm_area_struct *vma = vmf->vma;
+	vm_fault_t ret;
 
 	if (userfaultfd_pte_wp(vma, *vmf->pte)) {
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
@@ -3444,7 +3445,8 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 			return wp_pfn_shared(vmf);
 
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
-		return wp_page_copy(vmf);
+        ret = wp_page_copy(vmf);
+        return ret;
 	}
 
 	/*
@@ -3482,7 +3484,8 @@ copy:
 	get_page(vmf->page);
 
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
-	return wp_page_copy(vmf);
+	ret = wp_page_copy(vmf);
+	return ret;
 }
 
 static void unmap_mapping_range_vma(struct vm_area_struct *vma,

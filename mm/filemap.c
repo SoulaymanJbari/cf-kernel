@@ -2208,12 +2208,13 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
 	unsigned long offset;      /* offset into pagecache page */
 	unsigned int prev_offset;
 	int error = 0;
+	ktime_t t_total, t_copy;
 
 	if (unlikely(*ppos >= inode->i_sb->s_maxbytes))
 		return 0;
 	if (unlikely(!iov_iter_count(iter)))
 		return 0;
-
+	t_total = rc_measure_start();
 	iov_iter_truncate(iter, inode->i_sb->s_maxbytes);
 
 	index = *ppos >> PAGE_SHIFT;
@@ -2365,8 +2366,10 @@ page_ok:
 					remap_user_page(user_virt_addr, page);
 				}
 			}
-		} 
+		}
+		t_copy = rc_measure_start();
 		ret = copy_page_to_iter(page, offset, nr, iter);
+		rc_measure_end(t_copy, RC_TIMER_RW_COPY);
 		offset += ret;
 		index += offset >> PAGE_SHIFT;
 		offset &= ~PAGE_MASK;
@@ -2503,6 +2506,7 @@ out:
 
 	*ppos = ((loff_t)index << PAGE_SHIFT) + offset;
 	file_accessed(filp);
+	rc_measure_end(t_total, RC_TIMER_RW_TOTAL);
 	return written ? written : error;
 }
 EXPORT_SYMBOL_GPL(generic_file_buffered_read);
@@ -3534,7 +3538,7 @@ again:
 				}
 			}
 		}
-
+		
 		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
 						&page, &fsdata);
 		if (unlikely(status < 0))
@@ -3572,7 +3576,6 @@ again:
 
 		balance_dirty_pages_ratelimited(mapping);
 	} while (iov_iter_count(i));
-
 	return written ? written : status;
 }
 EXPORT_SYMBOL(generic_perform_write);
