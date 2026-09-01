@@ -7107,7 +7107,6 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 		for (sa_idx = 0; sa_idx < zone->num_subarrays; sa_idx++) {
 			sa = &zone->subarrays[sa_idx];
 			bitmap_fill(sa->bitmap, SUBARRAY_PAGES);
-			sa->free_pages = NULL;
 			spin_lock_init(&sa->lock);
 			sa->count = 0;
 		}
@@ -9613,12 +9612,24 @@ bool has_managed_dma(void)
 #include <linux/percpu.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/ktime.h>
+#include <linux/string.h>
+
+bool rc_timer_running = false;
+EXPORT_SYMBOL(rc_timer_running);
+
+static ktime_t rc_timer_start;
+static u64 rc_timer_total_ns = 0;
+static DEFINE_SPINLOCK(rc_timer_lock);
 
 DEFINE_PER_CPU_ALIGNED(unsigned long[NR_ROWCLONE_STATS], rowclone_stats_pcpu);
 EXPORT_PER_CPU_SYMBOL(rowclone_stats_pcpu);
 
 DEFINE_PER_CPU_ALIGNED(struct rowclone_ring, rowclone_rings);
 EXPORT_PER_CPU_SYMBOL(rowclone_rings);
+
+DEFINE_PER_CPU(u64[NR_RC_TIMERS], rc_rw_time_ns);
+EXPORT_PER_CPU_SYMBOL(rc_rw_time_ns);
 
 static struct page *alloc_same_subarray(struct page *old_page, 
                                     unsigned long subarray_idx)
@@ -9884,11 +9895,107 @@ static const struct proc_ops rowclone_ring_proc_ops = {
     .proc_release = single_release,
 };
 
+static int rowclone_timer_proc_show(struct seq_file *m, void *v)
+{
+    unsigned long flags;
+    u64 total_wallclock_ns = rc_timer_total_ns;
+    u64 timers[NR_RC_TIMERS] = {0};
+    bool running;
+    int cpu, i;
+
+    spin_lock_irqsave(&rc_timer_lock, flags);
+    running = rc_timer_running;
+    if (running)
+        total_wallclock_ns += ktime_to_ns(ktime_sub(ktime_get(), rc_timer_start));
+    spin_unlock_irqrestore(&rc_timer_lock, flags);
+
+    for_each_possible_cpu(cpu) {
+        for (i = 0; i < NR_RC_TIMERS; i++)
+            timers[i] += per_cpu(rc_rw_time_ns, cpu)[i];
+    }
+
+    seq_printf(m, "status:          %s\n", running ? "running" : "stopped");
+
+    seq_printf(m, "total_bench_ms:  %llu\n", total_wallclock_ns / 1000000ULL);
+
+    if (total_wallclock_ns > 0) {
+        u64 total_ms = timers[RC_TIMER_RW_TOTAL] / 1000000ULL;
+        u64 total_us = timers[RC_TIMER_RW_TOTAL] / 1000ULL;
+        u64 total_pct = (timers[RC_TIMER_RW_TOTAL] * 10000ULL) / total_wallclock_ns;
+
+        u64 copy_ms = timers[RC_TIMER_RW_COPY] / 1000000ULL;
+        u64 copy_us = timers[RC_TIMER_RW_COPY] / 1000ULL;
+        u64 copy_pct = (timers[RC_TIMER_RW_COPY] * 10000ULL) / total_wallclock_ns;
+
+        u64 copy_of_rw = timers[RC_TIMER_RW_TOTAL] ? 
+            (timers[RC_TIMER_RW_COPY] * 10000ULL) / timers[RC_TIMER_RW_TOTAL] : 0;
+
+        seq_printf(m, "\n=== RW BREAKDOWN ===\n");
+        seq_printf(m, "r_total:        %4llu ms (%7llu us) | %2llu.%02llu %% bench\n",
+                   total_ms, total_us, total_pct / 100, total_pct % 100);
+        seq_printf(m, "r_pure_copy:    %4llu ms (%7llu us) | %2llu.%02llu %% bench | %2llu.%02llu %% of rw\n",
+                   copy_ms, copy_us, copy_pct / 100, copy_pct % 100,
+                   copy_of_rw / 100, copy_of_rw % 100);
+    }
+
+    return 0;
+}
+
+static int rowclone_timer_proc_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, rowclone_timer_proc_show, NULL);
+}
+
+static ssize_t rowclone_timer_proc_write(struct file *file, const char __user *buffer,
+                                         size_t count, loff_t *ppos)
+{
+    char kbuf[32];
+    size_t len = min(count, sizeof(kbuf) - 1);
+    unsigned long flags;
+    int cpu;
+
+    if (copy_from_user(kbuf, buffer, len))
+        return -EFAULT;
+    kbuf[len] = '\0';
+
+    spin_lock_irqsave(&rc_timer_lock, flags);
+    if (sysfs_streq(kbuf, "start") || sysfs_streq(kbuf, "1")) {
+        if (!rc_timer_running) {
+            rc_timer_start = ktime_get();
+            rc_timer_running = true;
+        }
+    } else if (sysfs_streq(kbuf, "stop") || sysfs_streq(kbuf, "0")) {
+        if (rc_timer_running) {
+            rc_timer_total_ns += ktime_to_ns(ktime_sub(ktime_get(), rc_timer_start));
+            rc_timer_running = false;
+        }
+    } else if (sysfs_streq(kbuf, "reset")) {
+        rc_timer_total_ns = 0;
+        if (rc_timer_running)
+            rc_timer_start = ktime_get();
+        for_each_possible_cpu(cpu) {
+            memset(per_cpu(rc_rw_time_ns, cpu), 0, sizeof(u64) * NR_RC_TIMERS);
+        }
+	}
+    spin_unlock_irqrestore(&rc_timer_lock, flags);
+
+    return count;
+}
+
+static const struct proc_ops rowclone_timer_proc_ops = {
+    .proc_open    = rowclone_timer_proc_open,
+    .proc_read    = seq_read,
+    .proc_write   = rowclone_timer_proc_write,
+    .proc_lseek   = seq_lseek,
+    .proc_release = single_release,
+};
+
 static int __init rowclone_init_procfs(void)
 {
     proc_create("rowclone_stats", 0666, NULL, &rowclone_proc_ops);
     proc_create("rowclone_ring", 0666, NULL, &rowclone_ring_proc_ops);
-    return 0;
+    proc_create("rowclone_timer", 0666, NULL, &rowclone_timer_proc_ops);
+	return 0;
 }
 subsys_initcall(rowclone_init_procfs);
 #endif
