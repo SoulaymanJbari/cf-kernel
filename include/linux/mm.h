@@ -3460,12 +3460,14 @@ static inline void log_rowclone_fast(unsigned long src, unsigned long dst)
 enum rowclone_stat_type {
     ROWCLONE_STAT_READ,
     ROWCLONE_STAT_WRITE,
+	ROWCLONE_STAT_COW,
 
     ROWCLONE_STAT_ALIGNED_READ,
     ROWCLONE_STAT_ALIGNED_WRITE,
 
     ROWCLONE_STAT_ROWCLONE_READ,
     ROWCLONE_STAT_ROWCLONE_WRITE,
+	ROWCLONE_STAT_ROWCLONE_COW,
 
 	ROWCLONE_ERR_USER_INVALID_SUBARRAY,
     ROWCLONE_ERR_USER_VMA_NOT_FOUND,
@@ -3492,6 +3494,7 @@ static inline void rowclone_inc_stat(enum rowclone_stat_type type)
 int remap_user_page(unsigned long user_vaddr, struct page* cache_page);
 int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgoff_t index);
 int get_subarray_idx(struct page *page);
+struct page *alloc_same_subarray(struct page *old_page, unsigned long subarray_idx);
 #endif
 
 #endif /* __KERNEL__ */

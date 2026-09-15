@@ -9619,7 +9619,7 @@ EXPORT_PER_CPU_SYMBOL(rowclone_stats_pcpu);
 DEFINE_PER_CPU_ALIGNED(struct rowclone_ring, rowclone_rings);
 EXPORT_PER_CPU_SYMBOL(rowclone_rings);
 
-static struct page *alloc_same_subarray(struct page *old_page, 
+struct page *alloc_same_subarray(struct page *old_page, 
                                     unsigned long subarray_idx)
 {
     struct page *page;
@@ -9790,6 +9790,7 @@ static int rowclone_proc_show(struct seq_file *m, void *v)
     seq_printf(m, "=== BASELINE METRICS ===\n");
     seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_READ]);
     seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_WRITE]);
+	seq_printf(m, "CoW count:   %lu\n", total[ROWCLONE_STAT_COW]);
 
     seq_printf(m, "=== ALIGNEMENT METRICS ===\n");
     seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ALIGNED_READ]);
@@ -9798,6 +9799,7 @@ static int rowclone_proc_show(struct seq_file *m, void *v)
     seq_printf(m, "=== ROWCLONE METRICS ===\n");
     seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ROWCLONE_READ]);
     seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ROWCLONE_WRITE]);
+	seq_printf(m, "CoW count:   %lu\n", total[ROWCLONE_STAT_ROWCLONE_COW]);
 
     seq_printf(m, "=== REMAP USER FAILURES ===\n");
 	seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_USER_INVALID_SUBARRAY]);
