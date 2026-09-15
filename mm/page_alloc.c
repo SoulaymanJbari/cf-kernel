@@ -9746,8 +9746,12 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
                 putback_movable_pages(&page_list);
                 rowclone_inc_stat(ROWCLONE_ERR_KERNEL_MIGRATION);
             } else {
-                rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
-                log_rowclone_fast(page_to_phys(user_page), page_to_phys(cache_page));
+				struct page* new_cache_page = find_get_page(mapping, index);
+				if (new_cache_page) {
+					rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_WRITE);
+                	log_rowclone_fast(page_to_phys(user_page), page_to_phys(new_cache_page));
+					put_page(new_cache_page);
+				} 
             }
         } else {
             rowclone_inc_stat(ROWCLONE_ERR_KERNEL_ISOLATE_LRU);
