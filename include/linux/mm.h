@@ -3434,28 +3434,6 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 #endif
 
 #ifdef CONFIG_ZONE_LAR
-#define RC_RING_SIZE 32768 /* Doit être une puissance de 2 */
-
-struct rowclone_entry {
-    unsigned long src;
-    unsigned long dst;
-};
-
-struct rowclone_ring {
-    struct rowclone_entry entries[RC_RING_SIZE];
-    unsigned int head;
-};
-
-DECLARE_PER_CPU_ALIGNED(struct rowclone_ring, rowclone_rings);
-
-static inline void log_rowclone_fast(unsigned long src, unsigned long dst)
-{
-    struct rowclone_ring *ring = this_cpu_ptr(&rowclone_rings);
-    unsigned int idx = ring->head++ & (RC_RING_SIZE - 1);
-
-    ring->entries[idx].src = src;
-    ring->entries[idx].dst = dst;
-}
 
 enum rowclone_stat_type {
     ROWCLONE_STAT_READ,
