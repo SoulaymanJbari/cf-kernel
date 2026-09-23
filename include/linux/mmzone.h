@@ -39,7 +39,7 @@ extern unsigned long lar_zone_start_pfn;
 
 #define SUBARRAY_PAGES 		512
 #define MAX_SUBARRAYS		4096
-#define LAR_ZONE_PERCENT 	80
+#define LAR_ZONE_PERCENT 	50
 
 #define RA_BITS				1
 #define BA_BITS				4
