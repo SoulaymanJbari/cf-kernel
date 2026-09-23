@@ -251,32 +251,18 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	if (!arm64_dma_phys_limit)
 		arm64_dma_phys_limit = dma32_phys_limit;
 #endif
+	max_zone_pfns[ZONE_NORMAL] = max;
 #ifdef CONFIG_ZONE_LAR
 	{
-		unsigned long normal_start_pfn = min;
-		unsigned long high_mem_pages;
-		unsigned long lar_pages;
-#ifdef CONFIG_ZONE_DMA32
-		if (!disable_dma32)
-			normal_start_pfn = max_t(unsigned long, normal_start_pfn, PFN_DOWN(dma32_phys_limit));
-#endif
-#ifdef CONFIG_ZONE_DMA
-		normal_start_pfn  = max_t(unsigned long, normal_start_pfn, PFN_DOWN(arm64_dma_phys_limit));
-#endif
-		if (max > normal_start_pfn)
-			high_mem_pages = max - normal_start_pfn;
-		else {
-			high_mem_pages = 0;
-		}
-		lar_pages = (high_mem_pages * LAR_ZONE_PERCENT) / 100;
-		lar_zone_start_pfn = ALIGN_DOWN(max - lar_pages, LAR_ZONE_ALIGN_PFN);
-		max_zone_pfns[ZONE_NORMAL] = lar_zone_start_pfn;
+		int i;
+		lar_zone_start_pfn = ALIGN_DOWN(max - ((max - min) * LAR_ZONE_PERCENT) / 100, LAR_ZONE_ALIGN_PFN);
 		max_zone_pfns[ZONE_LAR] = max;
+		for (i = 0; i < ZONE_LAR; i++) {
+			if (max_zone_pfns[i] > lar_zone_start_pfn)
+				max_zone_pfns[i] = lar_zone_start_pfn;
+		}
 	}
-#else
-	max_zone_pfns[ZONE_NORMAL] = max;
 #endif
-
 	free_area_init(max_zone_pfns);
 }
 
