@@ -3457,38 +3457,6 @@ static inline void log_rowclone_fast(unsigned long src, unsigned long dst)
     ring->entries[idx].dst = dst;
 }
 
-enum rowclone_stat_type {
-    ROWCLONE_STAT_READ,
-    ROWCLONE_STAT_WRITE,
-
-    ROWCLONE_STAT_ALIGNED_READ,
-    ROWCLONE_STAT_ALIGNED_WRITE,
-
-    ROWCLONE_STAT_ROWCLONE_READ,
-    ROWCLONE_STAT_ROWCLONE_WRITE,
-
-	ROWCLONE_ERR_USER_INVALID_SUBARRAY,
-    ROWCLONE_ERR_USER_VMA_NOT_FOUND,
-    ROWCLONE_ERR_USER_FOLLOW_PAGE,
-    ROWCLONE_ERR_USER_ISOLATE_LRU,
-    ROWCLONE_ERR_USER_MIGRATION,
-
-	ROWCLONE_ERR_KERNEL_INVALID_SUBARRAY,
-    ROWCLONE_ERR_KERNEL_PAGE_MAPPED,
-    ROWCLONE_ERR_KERNEL_ISOLATE_LRU,
-    ROWCLONE_ERR_KERNEL_MIGRATION,
-    ROWCLONE_ERR_KERNEL_ALLOC,
-	ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE,
-
-    NR_ROWCLONE_STATS
-};
-DECLARE_PER_CPU_ALIGNED(unsigned long[NR_ROWCLONE_STATS], rowclone_stats_pcpu);
-
-static inline void rowclone_inc_stat(enum rowclone_stat_type type)
-{
-    this_cpu_inc(rowclone_stats_pcpu[type]);
-}
-
 int remap_user_page(unsigned long user_vaddr, struct page* cache_page);
 int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgoff_t index);
 int get_subarray_idx(struct page *page);
