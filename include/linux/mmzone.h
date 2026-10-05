@@ -38,7 +38,7 @@ extern unsigned long lar_zone_start_pfn;
 //#define LAR_MAP_CHRABAROCO 1
 
 #define SUBARRAY_PAGES 		512
-#define MAX_SUBARRAYS		4096
+#define MAX_SUBARRAYS		8192
 #define LAR_ZONE_PERCENT 	80
 
 #define RA_BITS				1
