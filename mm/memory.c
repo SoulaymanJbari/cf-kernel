@@ -3168,10 +3168,22 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		if (!new_page)
 			goto out;
 	} else {
-		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
-				vmf->address);
-		if (!new_page)
-			goto out;
+#ifdef CONFIG_ZONE_LAR
+        int sa_idx = old_page ? get_subarray_idx(old_page) : -1;
+        rowclone_inc_stat(ROWCLONE_STAT_COW);
+        if (sa_idx >= 0)
+            new_page = alloc_same_subarray(old_page, (unsigned long)sa_idx);
+        if (new_page) {
+            rowclone_inc_stat(ROWCLONE_STAT_ROWCLONE_COW);
+            log_rowclone_fast(page_to_phys(old_page), page_to_phys(new_page));
+        } else
+#endif
+		{
+            new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
+                    vmf->address);
+            if (!new_page)
+                goto out;
+        }
 
 		if (!cow_user_page(new_page, old_page, vmf)) {
 			/*

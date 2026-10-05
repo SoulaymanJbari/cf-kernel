@@ -9619,7 +9619,9 @@ EXPORT_PER_CPU_SYMBOL(rowclone_stats_pcpu);
 DEFINE_PER_CPU_ALIGNED(struct rowclone_ring, rowclone_rings);
 EXPORT_PER_CPU_SYMBOL(rowclone_rings);
 
-static struct page *alloc_same_subarray(struct page *old_page, 
+static bool rowclone_debug_mode = false;
+
+struct page *alloc_same_subarray(struct page *old_page, 
                                     unsigned long subarray_idx)
 {
     struct page *page;
@@ -9787,32 +9789,43 @@ static int rowclone_proc_show(struct seq_file *m, void *v)
         }
     }
 
-    seq_printf(m, "=== BASELINE METRICS ===\n");
-    seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_READ]);
-    seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_WRITE]);
+    if (!rowclone_debug_mode) {
+        /* === AFFICHAGE NORMAL : ESSENTIEL UNIQUEMENT === */
+        seq_printf(m, "=== ROWCLONE SUMMARY ===\n");
+        seq_printf(m, "Read:     %lu (RowClone: %lu)\n", total[ROWCLONE_STAT_ALIGNED_READ], total[ROWCLONE_STAT_ROWCLONE_READ]);
+        seq_printf(m, "Write:    %lu (RowClone: %lu)\n", total[ROWCLONE_STAT_ALIGNED_WRITE], total[ROWCLONE_STAT_ROWCLONE_WRITE]);
+        seq_printf(m, "CoW:      %lu (RowClone: %lu)\n", total[ROWCLONE_STAT_COW], total[ROWCLONE_STAT_ROWCLONE_COW]);
+    } else {
+        /* === AFFICHAGE DEBUG UNIQUEMENT === */
+        seq_printf(m, "=== DEBUG: BASELINE METRICS ===\n");
+        seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_READ]);
+        seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_WRITE]);
+        seq_printf(m, "CoW count:   %lu\n", total[ROWCLONE_STAT_COW]);
 
-    seq_printf(m, "=== ALIGNEMENT METRICS ===\n");
-    seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ALIGNED_READ]);
-    seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ALIGNED_WRITE]);
+        seq_printf(m, "\n=== DEBUG: ALIGNMENT METRICS ===\n");
+        seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ALIGNED_READ]);
+        seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ALIGNED_WRITE]);
 
-    seq_printf(m, "=== ROWCLONE METRICS ===\n");
-    seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ROWCLONE_READ]);
-    seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ROWCLONE_WRITE]);
+        seq_printf(m, "\n=== DEBUG: ROWCLONE METRICS ===\n");
+        seq_printf(m, "Read count:  %lu\n", total[ROWCLONE_STAT_ROWCLONE_READ]);
+        seq_printf(m, "Write count: %lu\n", total[ROWCLONE_STAT_ROWCLONE_WRITE]);
+        seq_printf(m, "CoW count:   %lu\n", total[ROWCLONE_STAT_ROWCLONE_COW]);
 
-    seq_printf(m, "=== REMAP USER FAILURES ===\n");
-	seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_USER_INVALID_SUBARRAY]);
-    seq_printf(m, "VMA not found:    %lu\n", total[ROWCLONE_ERR_USER_VMA_NOT_FOUND]);
-    seq_printf(m, "Follow page err:  %lu\n", total[ROWCLONE_ERR_USER_FOLLOW_PAGE]);
-    seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_USER_ISOLATE_LRU]);
-    seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_USER_MIGRATION]);
+        seq_printf(m, "\n=== DEBUG: REMAP USER FAILURES ===\n");
+        seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_USER_INVALID_SUBARRAY]);
+        seq_printf(m, "VMA not found:    %lu\n", total[ROWCLONE_ERR_USER_VMA_NOT_FOUND]);
+        seq_printf(m, "Follow page err:  %lu\n", total[ROWCLONE_ERR_USER_FOLLOW_PAGE]);
+        seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_USER_ISOLATE_LRU]);
+        seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_USER_MIGRATION]);
 
-    seq_printf(m, "=== REMAP KERNEL FAILURES ===\n");
-	seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_KERNEL_INVALID_SUBARRAY]);
-    seq_printf(m, "Page mapped err:  %lu\n", total[ROWCLONE_ERR_KERNEL_PAGE_MAPPED]);
-    seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_KERNEL_ISOLATE_LRU]);
-    seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_KERNEL_MIGRATION]);
-    seq_printf(m, "Alloc sa err:     %lu\n", total[ROWCLONE_ERR_KERNEL_ALLOC]);
-	seq_printf(m, "Add pagecache err:%lu\n", total[ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE]);
+        seq_printf(m, "\n=== DEBUG: REMAP KERNEL FAILURES ===\n");
+        seq_printf(m, "Invalid subarray: %lu\n", total[ROWCLONE_ERR_KERNEL_INVALID_SUBARRAY]);
+        seq_printf(m, "Page mapped err:  %lu\n", total[ROWCLONE_ERR_KERNEL_PAGE_MAPPED]);
+        seq_printf(m, "Isolate LRU err:  %lu\n", total[ROWCLONE_ERR_KERNEL_ISOLATE_LRU]);
+        seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_KERNEL_MIGRATION]);
+        seq_printf(m, "Alloc sa err:     %lu\n", total[ROWCLONE_ERR_KERNEL_ALLOC]);
+        seq_printf(m, "Add pagecache err:%lu\n", total[ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE]);
+    }
     
     return 0;
 }
@@ -9825,10 +9838,24 @@ static int rowclone_proc_open(struct inode *inode, struct file *file)
 static ssize_t rowclone_proc_write(struct file *file, const char __user *buffer,
                                    size_t count, loff_t *ppos)
 {
+    char kbuf[32];
+    size_t len = min(count, sizeof(kbuf) - 1);
     int cpu;
-    for_each_possible_cpu(cpu) {
-        memset(per_cpu(rowclone_stats_pcpu, cpu), 0, sizeof(unsigned long) * NR_ROWCLONE_STATS);
+
+    if (copy_from_user(kbuf, buffer, len))
+        return -EFAULT;
+    kbuf[len] = '\0';
+
+    if (sysfs_streq(kbuf, "debug") || sysfs_streq(kbuf, "1")) {
+        rowclone_debug_mode = true;
+    } else if (sysfs_streq(kbuf, "normal") || sysfs_streq(kbuf, "0")) {
+        rowclone_debug_mode = false;
+    } else {
+        for_each_possible_cpu(cpu) {
+            memset(per_cpu(rowclone_stats_pcpu, cpu), 0, sizeof(unsigned long) * NR_ROWCLONE_STATS);
+        }
     }
+
     return count;
 }
 
