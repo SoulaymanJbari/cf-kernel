@@ -941,6 +941,44 @@ config LRU_GEN_STATS
 	  This option has a per-memcg and per-node memory overhead.
 # }
 
+config ZONE_LAR
+	bool "Low Latency Allocation Region (LAR) zone"
+	default y
+	help
+	  Active la zone mémoire dédiée LAR.
+
+config ZONE_LAR_PERCENT
+	int "Pourcentage de mémoire allouée à ZONE_LAR"
+	default 80
+	range 1 99
+	help
+	  Pourcentage de la mémoire physique allouée à la zone LAR (de 1% à 99%).
+
+choice
+	prompt "DRAM Mapping Scheme for LAR"
+	default LAR_MAP_ROBARACOCH
+	help
+	  Sélectionne le schéma d'entrelacement physique de la DRAM pour LAR.
+
+config LAR_MAP_ROBARACOCH
+	bool "Ro-Ba-Ra-Co-Ch (Row-Bank-Rank-Col-Channel)"
+	help
+	  Mapping avec Row en poids fort, puis Bank, Rank, Column.
+
+config LAR_MAP_CHRABAROCO
+	bool "Ch-Ra-Ba-Ro-Co (Channel-Rank-Bank-Row-Col)"
+	help
+	  Mapping alternatif avec Column/Row en poids faible.
+
+endchoice
+
+config LAR_RESERVED_PAGES_PER_SUBARRAY
+	int "Nombre de pages réservées par subarray"
+	default 16
+	range 0 511
+	help
+	  Nombre de pages réservées pour RowClone par sous-tableau de 512 pages.
+
 source "mm/damon/Kconfig"
 
 endmenu

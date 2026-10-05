@@ -1043,7 +1043,7 @@ void free_lar_page(struct page *page)
 	spin_lock_irqsave(&sa->lock, flags);
 	__clear_bit(row_idx, sa->bitmap);
 	sa->count++;
-	if (sa->count == 17) {
+	if (sa->count == (LAR_RESERVED_PAGES + 1)) {
         clear_bit(subarray_idx, zone->full_subarrays_bitmap);
     }
 	spin_unlock_irqrestore(&sa->lock, flags);
@@ -5411,7 +5411,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 			unsigned long pfn;
 			__set_bit(row_idx, sa->bitmap);
 			sa->count--;
-			if (sa->count == 16) {
+			if (sa->count == LAR_RESERVED_PAGES) {
 				set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
 			}
 			spin_unlock_irqrestore(&sa->lock, flags);
@@ -5424,7 +5424,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 
 		}
 	}
-	if (sa->count == 16) {
+	if (sa->count == LAR_RESERVED_PAGES) {
         set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
     }
     spin_unlock_irqrestore(&sa->lock, flags);

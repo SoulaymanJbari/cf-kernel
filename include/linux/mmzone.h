@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#define CONFIG_ZONE_LAR 1
 #ifndef _LINUX_MMZONE_H
 #define _LINUX_MMZONE_H
 
@@ -34,25 +33,34 @@
 
 #ifdef CONFIG_ZONE_LAR
 extern unsigned long lar_zone_start_pfn;
-#define LAR_MAP_ROBARACOCH 	1
-//#define LAR_MAP_CHRABAROCO 1
 
 #define SUBARRAY_PAGES 		512
 #define MAX_SUBARRAYS		8192
+
+#ifdef CONFIG_ZONE_LAR_PERCENT
+#define LAR_ZONE_PERCENT 	CONFIG_ZONE_LAR_PERCENT
+#else
 #define LAR_ZONE_PERCENT 	80
+#endif
+
+#ifdef CONFIG_LAR_RESERVED_PAGES_PER_SUBARRAY
+#define LAR_RESERVED_PAGES   CONFIG_LAR_RESERVED_PAGES_PER_SUBARRAY
+#else
+#define LAR_RESERVED_PAGES   16
+#endif
 
 #define RA_BITS				1
 #define BA_BITS				4
 #define ROW_IN_SA_BITS		9
 #define SA_IN_BANK_BITS		7
 
-#if defined(LAR_MAP_ROBARACOCH)
+#if defined(CONFIG_LAR_MAP_ROBARACOCH)
 	#define RA_SHIFT_PA			(PAGE_SHIFT)
 	#define BA_SHIFT_PA			(RA_SHIFT_PA + RA_BITS)
 	#define ROW_IN_SA_SHIFT_PA 	(BA_SHIFT_PA + BA_BITS)
 	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
 	
-#elif defined(LAR_MAP_CHRABAROCO)
+#elif defined(CONFIG_LAR_MAP_CHRABAROCO)
 	#define ROW_IN_SA_SHIFT_PA 	(PAGE_SHIFT)
 	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
 	#define BA_SHIFT_PA			(SA_IN_BANK_SHIFT_PA + SA_IN_BANK_BITS)
@@ -72,12 +80,12 @@ static inline int lar_pfn_to_subarray_idx(unsigned long pfn)
 {
 	unsigned long rel_pfn = pfn - lar_zone_start_pfn;
 	phys_addr_t pa = (phys_addr_t)rel_pfn << PAGE_SHIFT;
-#if defined(LAR_MAP_ROBARACOCH)
+#if defined(CONFIG_LAR_MAP_ROBARACOCH)
 	unsigned int ra = (pa >> RA_SHIFT_PA) & ((1 << RA_BITS) - 1);
 	unsigned int ba = (pa >> BA_SHIFT_PA) & ((1 << BA_BITS) - 1);
 	unsigned int sa_in_bank = (pa >> SA_IN_BANK_SHIFT_PA) & ((1 << SA_IN_BANK_BITS) - 1);
 	return (sa_in_bank << (BA_BITS + RA_BITS)) | (ba << RA_BITS) | ra;
-#elif defined(LAR_MAP_CHRABAROCO)
+#elif defined(CONFIG_LAR_MAP_CHRABAROCO)
 	return (int)(pa >> SA_IN_BANK_SHIFT_PA);
 #endif
 }
@@ -91,7 +99,7 @@ static inline unsigned int lar_pfn_to_row_idx(unsigned long pfn)
 
 static inline unsigned long lar_sub_row_to_pfn(unsigned int sa_idx, unsigned int row_idx)
 {
-#if defined(LAR_MAP_ROBARACOCH)
+#if defined(CONFIG_LAR_MAP_ROBARACOCH)
 	unsigned int ra = sa_idx & ((1 << RA_BITS) - 1);
 	unsigned ba = (sa_idx >> RA_BITS) & ((1 << BA_BITS) - 1);
 	unsigned int sa_in_bank = sa_idx >> (BA_BITS + RA_BITS);
@@ -100,7 +108,7 @@ static inline unsigned long lar_sub_row_to_pfn(unsigned int sa_idx, unsigned int
 						((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA) 		|
 						((phys_addr_t)ba << BA_SHIFT_PA)					|
 						((phys_addr_t)ra << RA_SHIFT_PA);
-#elif defined(LAR_MAP_CHRABAROCO)
+#elif defined(CONFIG_LAR_MAP_CHRABAROCO)
 	phys_addr_t pa = 	((phys_addr_t)sa_idx << SA_IN_BANK_SHIFT_PA) 		|
 						((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA);
 #endif
