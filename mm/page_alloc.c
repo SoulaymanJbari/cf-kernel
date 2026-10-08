@@ -1047,7 +1047,6 @@ void free_lar_page(struct page *page)
         clear_bit(subarray_idx, zone->full_subarrays_bitmap);
     }
 	spin_unlock_irqrestore(&sa->lock, flags);
-	SetPageReserved(page);
 	__mod_zone_page_state(zone, NR_FREE_PAGES, 1);
 	return;
 }
@@ -5405,7 +5404,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	spin_unlock_irqrestore(&lar_zone->rr_lock, flags);
 	sa = &lar_zone->subarrays[subarray_idx];
 	spin_lock_irqsave(&sa->lock, flags);
-	if (sa->count > 16) {
+	if (sa->count > LAR_RESERVED_PAGES) {
 		row_idx = find_first_zero_bit(sa->bitmap, SUBARRAY_PAGES);
 		if (row_idx < SUBARRAY_PAGES) {
 			unsigned long pfn;
@@ -5418,7 +5417,6 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 			pfn = lar_sub_row_to_pfn(subarray_idx, row_idx);
 			page = pfn_to_page(pfn);
 			__mod_zone_page_state(lar_zone, NR_FREE_PAGES, -1);
-			ClearPageReserved(page);
 			post_alloc_hook(page, 0, gfp_mask);
 			return page;
 
@@ -6635,28 +6633,6 @@ void __meminit memmap_init_zone(unsigned long size, int nid, unsigned long zone,
 		if (start_pfn == altmap->base_pfn)
 			start_pfn += altmap->reserve;
 		end_pfn = altmap->base_pfn + vmem_altmap_offset(altmap);
-	}
-#endif
-#ifdef CONFIG_ZONE_LAR
-	if (zone == ZONE_LAR) {
-		for (pfn = start_pfn; pfn < end_pfn; ) {
-			struct page *page_z = pfn_to_page(pfn);
-			if (context == MEMINIT_EARLY) {
-				if (overlap_memmap_init(zone, &pfn))
-					continue;
-				if (defer_init(nid, pfn, zone_end_pfn))
-					break;
-			}
-
-			__init_single_page(page_z, pfn, zone, nid);
-			SetPageReserved(page_z);
-			if (IS_ALIGNED(pfn, pageblock_nr_pages)) {
-				set_pageblock_migratetype(page_z, migratetype);
-				cond_resched();
-			}
-			pfn++;
-		}
-		return;
 	}
 #endif
 	for (pfn = start_pfn; pfn < end_pfn; ) {
