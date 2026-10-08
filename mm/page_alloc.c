@@ -5389,7 +5389,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 
 	lar_zone = &NODE_DATA(preferred_nid)->node_zones[ZONE_LAR];
 	wmark = wmark_pages(lar_zone, WMARK_LOW);
-	if (zone_page_state(lar_zone, NR_FREE_PAGES) <= wmark) {
+	if (unlikely(zone_page_state(lar_zone, NR_FREE_PAGES) <= wmark)) {
 		wakeup_kswapd(lar_zone, gfp_mask, 0, ZONE_LAR);
 	}
 	spin_lock_irqsave(&lar_zone->rr_lock, flags);
@@ -8448,7 +8448,11 @@ static void __setup_per_zone_wmarks(void)
 
 	/* Calculate total number of !ZONE_HIGHMEM pages */
 	for_each_zone(zone) {
-		if (!is_highmem(zone))
+		if (!is_highmem(zone)
+#ifdef CONFIG_ZONE_LAR
+			&& zone_idx(zone) != ZONE_LAR
+#endif
+	)
 			lowmem_pages += zone_managed_pages(zone);
 	}
 
@@ -8458,6 +8462,11 @@ static void __setup_per_zone_wmarks(void)
 		spin_lock_irqsave(&zone->lock, flags);
 		tmp = (u64)pages_min * zone_managed_pages(zone);
 		do_div(tmp, lowmem_pages);
+#ifdef CONFIG_ZONE_LAR
+		if (zone_idx(zone) == ZONE_LAR) {
+			zone->_watermark[WMARK_MIN] = (unsigned long)zone->num_subarrays * LAR_RESERVED_PAGES;
+		} else
+#endif
 		if (is_highmem(zone)) {
 			/*
 			 * __GFP_HIGH and PF_MEMALLOC allocations usually don't

@@ -6340,6 +6340,14 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 	unsigned long mark = -1;
 	struct zone *zone;
 
+#ifdef CONFIG_ZONE_LAR
+	if (highest_zoneidx == ZONE_LAR) {
+		zone = &pgdat->node_zones[ZONE_LAR];
+		if (!zone_watermark_ok_safe(zone, order, high_wmark_pages(zone), ZONE_LAR))
+			return false;
+	}
+#endif
+
 	/*
 	 * Check watermarks bottom-up as lower zones are more likely to
 	 * meet watermarks.
