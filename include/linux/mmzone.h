@@ -896,6 +896,7 @@ struct zone {
 	DECLARE_BITMAP(full_subarrays_bitmap, MAX_SUBARRAYS);
 	spinlock_t rr_lock;
 	unsigned int rr_cursor;
+	bool lar_spillover;
 	ANDROID_KABI_RESERVE(1);
 #else
 

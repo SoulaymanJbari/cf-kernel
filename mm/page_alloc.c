@@ -5385,12 +5385,21 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	struct subarray *sa;
 	unsigned long start_idx, subarray_idx, row_idx;
 	unsigned long flags;
-	unsigned long wmark;
+	unsigned long lar_free_pages;
 
 	lar_zone = &NODE_DATA(preferred_nid)->node_zones[ZONE_LAR];
-	wmark = wmark_pages(lar_zone, WMARK_LOW);
-	if (unlikely(zone_page_state(lar_zone, NR_FREE_PAGES) <= wmark)) {
+	lar_free_pages = zone_page_state(lar_zone, NR_FREE_PAGES);
+	if (unlikely(lar_zone->lar_spillover)) {
+		if (lar_free_pages >= wmark_pages(lar_zone, WMARK_HIGH))
+			lar_zone->lar_spillover = false;
+		else
+			return NULL;
+	} else if (unlikely(lar_free_pages <= wmark_pages(lar_zone, WMARK_LOW))) {
 		wakeup_kswapd(lar_zone, gfp_mask, 0, ZONE_LAR);
+		if (lar_free_pages <= wmark_pages(lar_zone, WMARK_MIN)) {
+			lar_zone->lar_spillover = true;
+			return NULL;
+		}
 	}
 	spin_lock_irqsave(&lar_zone->rr_lock, flags);
 	start_idx = (lar_zone->rr_cursor + 1) % lar_zone->num_subarrays;
@@ -7082,6 +7091,7 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 		zone->num_subarrays = size / SUBARRAY_PAGES;
 		spin_lock_init(&zone->rr_lock);
 		zone->rr_cursor = 0;
+		zone->lar_spillover = false;
 		bitmap_fill(zone->full_subarrays_bitmap, zone->num_subarrays);
 
 		for (sa_idx = 0; sa_idx < zone->num_subarrays; sa_idx++) {
@@ -8489,15 +8499,26 @@ static void __setup_per_zone_wmarks(void)
 			 */
 			zone->_watermark[WMARK_MIN] = tmp;
 		}
-
-		/*
-		 * Set the kswapd watermarks distance according to the
-		 * scale factor in proportion to available memory, but
-		 * ensure a minimum size on small systems.
-		 */
-		tmp = max_t(u64, tmp >> 2,
-			    mult_frac(zone_managed_pages(zone),
-				      watermark_scale_factor, 10000));
+#ifdef CONFIG_ZONE_LAR
+		if (zone_idx(zone) == ZONE_LAR) {
+			/*
+			 * Hystérésis renforcée pour ZONE_LAR :
+			 * 1/16 de la zone (~6,25 %), borné entre 32 Mo et 128 Mo.
+			 */
+			tmp = zone_managed_pages(zone) >> 4;
+			tmp = clamp_t(unsigned long, tmp, 8192UL, 32768UL);
+		} else
+#endif
+		{
+			/*
+			* Set the kswapd watermarks distance according to the
+			* scale factor in proportion to available memory, but
+			* ensure a minimum size on small systems.
+			*/
+			tmp = max_t(u64, tmp >> 2,
+				    mult_frac(zone_managed_pages(zone),
+					      watermark_scale_factor, 10000));
+		}
 
 		zone->watermark_boost = 0;
 		zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;
