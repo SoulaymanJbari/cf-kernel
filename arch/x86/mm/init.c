@@ -29,6 +29,7 @@
 #include <asm/text-patching.h>
 #include <asm/memtype.h>
 #include <asm/paravirt.h>
+#include <linux/mmzone.h>
 
 /*
  * We need to define the tracepoints somewhere, and tlb.c
@@ -1041,6 +1042,18 @@ void __init zone_sizes_init(void)
 	max_zone_pfns[ZONE_DMA32]	= disable_dma32 ? 0 : min(MAX_DMA32_PFN, max_low_pfn);
 #endif
 	max_zone_pfns[ZONE_NORMAL]	= max_low_pfn;
+#ifdef CONFIG_ZONE_LAR
+	{
+		int i;
+
+		lar_zone_start_pfn = ALIGN_DOWN(max_low_pfn - (max_low_pfn * LAR_ZONE_PERCENT) / 100, LAR_ZONE_ALIGN_PFN);
+		max_zone_pfns[ZONE_LAR] = max_low_pfn;
+		for (i = 0; i < ZONE_LAR; i++) {
+			if (max_zone_pfns[i] > lar_zone_start_pfn)
+				max_zone_pfns[i] = lar_zone_start_pfn;
+		}
+	}
+#endif
 #ifdef CONFIG_HIGHMEM
 	max_zone_pfns[ZONE_HIGHMEM]	= max_pfn;
 #endif

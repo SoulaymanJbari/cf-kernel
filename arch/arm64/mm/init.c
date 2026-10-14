@@ -43,9 +43,7 @@
 #include <linux/sizes.h>
 #include <asm/tlb.h>
 #include <asm/alternative.h>
-
 #include <linux/mmzone.h>
-#include <linux/pageblock-flags.h>
 
 /*
  * We need to be able to catch inadvertent references to memstart_addr
@@ -55,11 +53,6 @@
  */
 s64 memstart_addr __ro_after_init = -1;
 EXPORT_SYMBOL(memstart_addr);
-
-#ifdef CONFIG_ZONE_LAR
-unsigned long lar_zone_start_pfn = 0;
-EXPORT_SYMBOL(lar_zone_start_pfn);
-#endif
 
 /*
  * If the corresponding config options are enabled, we create both ZONE_DMA

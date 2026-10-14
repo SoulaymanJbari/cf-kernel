@@ -1021,6 +1021,9 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 }
 
 #ifdef CONFIG_ZONE_LAR
+unsigned long lar_zone_start_pfn = 0;
+EXPORT_SYMBOL(lar_zone_start_pfn);
+
 int get_subarray_idx(struct page *page)
 {
 	struct zone *zone = page_zone(page);
