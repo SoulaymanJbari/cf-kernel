@@ -87,6 +87,7 @@
 
 #include "pgalloc-track.h"
 #include "internal.h"
+#include "lar.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/pagefault.h>

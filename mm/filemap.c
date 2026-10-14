@@ -45,6 +45,7 @@
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include "internal.h"
+#include "lar.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/filemap.h>

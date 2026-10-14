@@ -75,45 +75,6 @@ struct subarray {
 	unsigned long bitmap[8];
    	unsigned int count;
 } ____cacheline_aligned;
-
-static inline int lar_pfn_to_subarray_idx(unsigned long pfn)
-{
-	unsigned long rel_pfn = pfn - lar_zone_start_pfn;
-	phys_addr_t pa = (phys_addr_t)rel_pfn << PAGE_SHIFT;
-#if defined(CONFIG_LAR_MAP_ROBARACOCH)
-	unsigned int ra = (pa >> RA_SHIFT_PA) & ((1 << RA_BITS) - 1);
-	unsigned int ba = (pa >> BA_SHIFT_PA) & ((1 << BA_BITS) - 1);
-	unsigned int sa_in_bank = (pa >> SA_IN_BANK_SHIFT_PA) & ((1 << SA_IN_BANK_BITS) - 1);
-	return (sa_in_bank << (BA_BITS + RA_BITS)) | (ba << RA_BITS) | ra;
-#elif defined(CONFIG_LAR_MAP_CHRABAROCO)
-	return (int)(pa >> SA_IN_BANK_SHIFT_PA);
-#endif
-}
-
-static inline unsigned int lar_pfn_to_row_idx(unsigned long pfn)
-{
-	unsigned long rel_pfn = pfn - lar_zone_start_pfn;
-	phys_addr_t pa = (phys_addr_t)rel_pfn << PAGE_SHIFT;
-	return (unsigned int)((pa >> ROW_IN_SA_SHIFT_PA) & ((1 << ROW_IN_SA_BITS) - 1));
-}
-
-static inline unsigned long lar_sub_row_to_pfn(unsigned int sa_idx, unsigned int row_idx)
-{
-#if defined(CONFIG_LAR_MAP_ROBARACOCH)
-	unsigned int ra = sa_idx & ((1 << RA_BITS) - 1);
-	unsigned ba = (sa_idx >> RA_BITS) & ((1 << BA_BITS) - 1);
-	unsigned int sa_in_bank = sa_idx >> (BA_BITS + RA_BITS);
-
-	phys_addr_t pa = 	((phys_addr_t)sa_in_bank << SA_IN_BANK_SHIFT_PA) 	|
-						((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA) 		|
-						((phys_addr_t)ba << BA_SHIFT_PA)					|
-						((phys_addr_t)ra << RA_SHIFT_PA);
-#elif defined(CONFIG_LAR_MAP_CHRABAROCO)
-	phys_addr_t pa = 	((phys_addr_t)sa_idx << SA_IN_BANK_SHIFT_PA) 		|
-						((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA);
-#endif
-	return lar_zone_start_pfn + (unsigned long)(pa >> PAGE_SHIFT);
-}
 #endif
 
 /*
