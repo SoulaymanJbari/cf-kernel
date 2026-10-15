@@ -121,8 +121,6 @@ static inline void rowclone_inc_stat(enum rowclone_stat_type type)
 
 /* ==================== RECLAIM LAR ==================== */
 
-#define LAR_KSWAPD_GIVEUP_PRIO (DEF_PRIORITY - 3)
-
 static inline bool lar_kswapd_should_giveup(pg_data_t* pgdat, int highest_zoneidx, int priority)
 {
 	struct zone* zone;
@@ -142,7 +140,7 @@ static inline bool lar_kswapd_should_giveup(pg_data_t* pgdat, int highest_zoneid
 	return false;
 }
 
-static inline lar_zone_is_balanced(pg_data_t* pgdat, int order, int highest_zoneidx)
+static inline bool lar_zone_is_balanced(pg_data_t* pgdat, int order, int highest_zoneidx)
 {
 	struct zone* zone;
 	if (highest_zoneidx != ZONE_LAR)

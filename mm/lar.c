@@ -137,9 +137,6 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 
 		}
 	}
-	if (sa->count == LAR_RESERVED_PAGES) {
-        set_bit(subarray_idx, lar_zone->full_subarrays_bitmap);
-    }
     spin_unlock_irqrestore(&sa->lock, flags);
 
     return NULL;

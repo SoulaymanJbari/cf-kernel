@@ -6346,10 +6346,8 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 	struct zone *zone;
 
 #ifdef CONFIG_ZONE_LAR
-	if (highest_zoneidx == ZONE_LAR) {
-		if (!lar_zone_is_balanced(pgdat, order, highest_zoneidx))
-			return false;
-	}
+	if (highest_zoneidx == ZONE_LAR)
+		return lar_zone_is_balanced(pgdat, order, highest_zoneidx);
 #endif
 
 	/*
