@@ -66,6 +66,7 @@ void init_lar_zone(struct zone *zone, unsigned long size)
 	spin_lock_init(&zone->rr_lock);
 	zone->rr_cursor = 0;
 	zone->lar_spillover = false;
+    zone->lar_kswapd_giveup = false;
 	bitmap_fill(zone->full_subarrays_bitmap, zone->num_subarrays);
 
 	for (sa_idx = 0; sa_idx < zone->num_subarrays; sa_idx++) {
@@ -88,13 +89,15 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 	lar_zone = &NODE_DATA(preferred_nid)->node_zones[ZONE_LAR];
 	lar_free_pages = zone_page_state(lar_zone, NR_FREE_PAGES);
 	if (unlikely(lar_zone->lar_spillover)) {
-		if (lar_free_pages >= wmark_pages(lar_zone, WMARK_HIGH))
-			lar_zone->lar_spillover = false;
-		else
+		if (lar_free_pages >= wmark_pages(lar_zone, WMARK_HIGH)) {
+			WRITE_ONCE(lar_zone->lar_spillover, false);
+            WRITE_ONCE(lar_zone->lar_kswapd_giveup, false);
+        } else
 			return NULL;
 	} else if (unlikely(lar_free_pages <= wmark_pages(lar_zone, WMARK_LOW))) {
-		wakeup_kswapd(lar_zone, gfp_mask, 0, ZONE_LAR);
-		if (lar_free_pages <= wmark_pages(lar_zone, WMARK_MIN)) {
+		if (!READ_ONCE(lar_zone->lar_kswapd_giveup))
+			wakeup_kswapd(lar_zone, gfp_mask, 0, ZONE_LAR);
+        if (lar_free_pages <= wmark_pages(lar_zone, WMARK_MIN)) {
 			lar_zone->lar_spillover = true;
 			return NULL;
 		}
@@ -108,6 +111,7 @@ struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid)
 		subarray_idx = find_first_zero_bit(lar_zone->full_subarrays_bitmap, start_idx);
 		if (subarray_idx >= start_idx) {
 			spin_unlock_irqrestore(&lar_zone->rr_lock, flags);
+            WRITE_ONCE(lar_zone->lar_spillover, true);
             return NULL;
         }
 	}

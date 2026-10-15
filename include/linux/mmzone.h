@@ -858,6 +858,7 @@ struct zone {
 	spinlock_t rr_lock;
 	unsigned int rr_cursor;
 	bool lar_spillover;
+	bool lar_kswapd_giveup;
 	ANDROID_KABI_RESERVE(1);
 #else
 

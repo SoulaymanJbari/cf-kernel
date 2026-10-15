@@ -63,6 +63,7 @@
 #include <linux/balloon_compaction.h>
 
 #include "internal.h"
+#include "lar.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
@@ -1153,6 +1154,10 @@ static unsigned int shrink_page_list(struct list_head *page_list,
 
 		page = lru_to_page(page_list);
 		list_del(&page->lru);
+#ifdef CONFIG_ZONE_LAR
+        if (sc->reclaim_idx == ZONE_LAR && page_zonenum(page) != ZONE_LAR)
+            goto keep;
+#endif
 
 		if (!trylock_page(page))
 			goto keep;
@@ -6342,8 +6347,7 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 
 #ifdef CONFIG_ZONE_LAR
 	if (highest_zoneidx == ZONE_LAR) {
-		zone = &pgdat->node_zones[ZONE_LAR];
-		if (!zone_watermark_ok_safe(zone, order, high_wmark_pages(zone), ZONE_LAR))
+		if (!lar_zone_is_balanced(pgdat, order, highest_zoneidx))
 			return false;
 	}
 #endif
@@ -6579,6 +6583,10 @@ restart:
 		 */
 		sc.may_writepage = !laptop_mode && !nr_boost_reclaim;
 		sc.may_swap = !nr_boost_reclaim;
+#ifdef CONFIG_ZONE_LAR
+        if (highest_zoneidx == ZONE_LAR)
+            sc.may_swap = 1;
+#endif
 
 		/*
 		 * Do some background aging, to give pages a chance to be
@@ -6642,6 +6650,12 @@ restart:
 
 		if (raise_priority || !nr_reclaimed)
 			sc.priority--;
+
+#ifdef CONFIG_ZONE_LAR
+        if (lar_kswapd_should_giveup(pgdat, highest_zoneidx, sc.priority))
+            break;
+#endif
+
 	} while (sc.priority >= 1);
 
 	if (!sc.nr_reclaimed)

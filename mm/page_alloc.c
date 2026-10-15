@@ -8388,12 +8388,7 @@ static void __setup_per_zone_wmarks(void)
 		}
 #ifdef CONFIG_ZONE_LAR
 		if (zone_idx(zone) == ZONE_LAR) {
-			/*
-			 * Hystérésis renforcée pour ZONE_LAR :
-			 * 1/16 de la zone (~6,25 %), borné entre 32 Mo et 128 Mo.
-			 */
-			tmp = zone_managed_pages(zone) >> 4;
-			tmp = clamp_t(unsigned long, tmp, 8192UL, 32768UL);
+			tmp = 8192UL;
 		} else
 #endif
 		{

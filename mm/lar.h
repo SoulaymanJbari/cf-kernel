@@ -119,6 +119,42 @@ static inline void rowclone_inc_stat(enum rowclone_stat_type type)
     this_cpu_inc(rowclone_stats_pcpu[type]);
 }
 
+/* ==================== RECLAIM LAR ==================== */
+
+#define LAR_KSWAPD_GIVEUP_PRIO (DEF_PRIORITY - 3)
+
+static inline bool lar_kswapd_should_giveup(pg_data_t* pgdat, int highest_zoneidx, int priority)
+{
+	struct zone* zone;
+	if (highest_zoneidx != ZONE_LAR)
+		return false;
+	zone = &pgdat->node_zones[ZONE_LAR];
+	
+	if (priority <= 3) {
+		unsigned long free_pages = zone_page_state(zone, NR_FREE_PAGES);
+
+		if (free_pages < wmark_pages(zone, WMARK_LOW)) {
+			WRITE_ONCE(zone->lar_spillover, true);
+			WRITE_ONCE(zone->lar_kswapd_giveup, true);
+			return true;
+		}
+	}
+	return false;
+}
+
+static inline lar_zone_is_balanced(pg_data_t* pgdat, int order, int highest_zoneidx)
+{
+	struct zone* zone;
+	if (highest_zoneidx != ZONE_LAR)
+		return true;
+	
+	zone = &pgdat->node_zones[ZONE_LAR];
+	if (READ_ONCE(zone->lar_kswapd_giveup))
+		return true;
+	
+	return zone_watermark_ok_safe(zone, order, high_wmark_pages(zone), ZONE_LAR);
+}
+
 #else
 
 static inline struct page *alloc_lar_page(gfp_t gfp_mask, int preferred_nid) { return NULL; }
@@ -132,6 +168,8 @@ static inline int remap_kernel_page(struct page *user_page, struct address_space
 
 static inline void log_rowclone_fast(unsigned long src, unsigned long dst) { }
 static inline void rowclone_inc_stat(int type) { }
+static inline bool lar_kswapd_should_giveup(pg_data_t* pgdat, int highest_zoneidx, int priority) { return false; }
+static inline bool lar_zone_is_balanced(pg_data_t *pgdat, int order, int highest_zoneidx) { return true; }
 
 #endif
 
