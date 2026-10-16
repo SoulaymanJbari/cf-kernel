@@ -73,6 +73,7 @@
 #include <linux/khugepaged.h>
 #include <trace/hooks/mm.h>
 #include "lar.h"
+#include <clocksource/arm_arch_timer.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -5358,12 +5359,15 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 #ifdef CONFIG_ZONE_LAR
+	u64 t_start = 0;
 	if (order == 0) {
 		page = alloc_lar_page(gfp_mask, preferred_nid);
 		if (page) {
 			return page;
 		}
-	}
+	} else {
+        t_start = arch_timer_read_counter();
+    }
 #endif
 
 	/*
@@ -5416,6 +5420,17 @@ out:
 	}
 
 	trace_mm_page_alloc(page, order, alloc_mask, ac.migratetype);
+#ifdef CONFIG_ZONE_LAR
+	if (order > 0 && page) {
+		u64 delta = arch_timer_read_counter() - t_start;
+		rowclone_inc_stat(ROWCLONE_STAT_ORDER_GT_0);
+        rowclone_add_stat(ROWCLONE_STAT_ORDER_GT_0_CYCLES, delta);
+		if (order >= 5) {
+            rowclone_inc_stat(ROWCLONE_STAT_ORDER_GE_5);
+            rowclone_add_stat(ROWCLONE_STAT_ORDER_GE_5_CYCLES, delta);
+        }
+	}
+#endif
 
 	return page;
 }

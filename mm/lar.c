@@ -316,6 +316,8 @@ static int rowclone_proc_show(struct seq_file *m, void *v)
         seq_printf(m, "Read:     %lu (RowClone: %lu)\n", total[ROWCLONE_STAT_ALIGNED_READ], total[ROWCLONE_STAT_ROWCLONE_READ]);
         seq_printf(m, "Write:    %lu (RowClone: %lu)\n", total[ROWCLONE_STAT_ALIGNED_WRITE], total[ROWCLONE_STAT_ROWCLONE_WRITE]);
         seq_printf(m, "CoW:      %lu (RowClone: %lu)\n", total[ROWCLONE_STAT_COW], total[ROWCLONE_STAT_ROWCLONE_COW]);
+        seq_printf(m, "Order > 0:  %lu (%lu cycles)\n", total[ROWCLONE_STAT_ORDER_GT_0], total[ROWCLONE_STAT_ORDER_GT_0_CYCLES]);
+        seq_printf(m, "Order >= 5: %lu (%lu cycles)\n", total[ROWCLONE_STAT_ORDER_GE_5], total[ROWCLONE_STAT_ORDER_GE_5_CYCLES]);
     } else {
         /* === AFFICHAGE DEBUG UNIQUEMENT === */
         seq_printf(m, "=== DEBUG: BASELINE METRICS ===\n");
@@ -346,6 +348,12 @@ static int rowclone_proc_show(struct seq_file *m, void *v)
         seq_printf(m, "Migration err:    %lu\n", total[ROWCLONE_ERR_KERNEL_MIGRATION]);
         seq_printf(m, "Alloc sa err:     %lu\n", total[ROWCLONE_ERR_KERNEL_ALLOC]);
         seq_printf(m, "Add pagecache err:%lu\n", total[ROWCLONE_ERR_KERNEL_ADD_PAGE_CACHE]);
+
+        seq_printf(m, "\n=== DEBUG: ALLOCATION TIMINGS ===\n");
+        seq_printf(m, "Order > 0 count:     %lu\n", total[ROWCLONE_STAT_ORDER_GT_0]);
+        seq_printf(m, "Order > 0 cycles:    %lu\n", total[ROWCLONE_STAT_ORDER_GT_0_CYCLES]);
+        seq_printf(m, "Order >= 5 count:    %lu\n", total[ROWCLONE_STAT_ORDER_GE_5]);
+        seq_printf(m, "Order >= 5 cycles:   %lu\n", total[ROWCLONE_STAT_ORDER_GE_5_CYCLES]);
     }
     
     return 0;

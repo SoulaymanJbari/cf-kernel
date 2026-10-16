@@ -90,6 +90,11 @@ enum rowclone_stat_type {
     ROWCLONE_STAT_WRITE,
 	ROWCLONE_STAT_COW,
 
+	ROWCLONE_STAT_ORDER_GT_0,
+    ROWCLONE_STAT_ORDER_GT_0_CYCLES,
+	ROWCLONE_STAT_ORDER_GE_5,
+    ROWCLONE_STAT_ORDER_GE_5_CYCLES,
+
     ROWCLONE_STAT_ALIGNED_READ,
     ROWCLONE_STAT_ALIGNED_WRITE,
 
@@ -117,6 +122,10 @@ DECLARE_PER_CPU_ALIGNED(unsigned long[NR_ROWCLONE_STATS], rowclone_stats_pcpu);
 static inline void rowclone_inc_stat(enum rowclone_stat_type type)
 {
     this_cpu_inc(rowclone_stats_pcpu[type]);
+}
+static inline void rowclone_add_stat(enum rowclone_stat_type type, unsigned long val)
+{
+    this_cpu_add(rowclone_stats_pcpu[type], val);
 }
 
 /* ==================== RECLAIM LAR ==================== */
@@ -166,6 +175,7 @@ static inline int remap_kernel_page(struct page *user_page, struct address_space
 
 static inline void log_rowclone_fast(unsigned long src, unsigned long dst) { }
 static inline void rowclone_inc_stat(int type) { }
+static inline void rowclone_add_stat(int type, unsigned long val) { }
 static inline bool lar_kswapd_should_giveup(pg_data_t* pgdat, int highest_zoneidx, int priority) { return false; }
 static inline bool lar_zone_is_balanced(pg_data_t *pgdat, int order, int highest_zoneidx) { return true; }
 
