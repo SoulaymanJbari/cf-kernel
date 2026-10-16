@@ -80,6 +80,25 @@
 #include "shuffle.h"
 #include "page_reporting.h"
 
+#include <clocksource/arm_arch_timer.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
+enum alloc_order_stats {
+	ALLOC_STAT_ORDER_GT_0_CNT,
+	ALLOC_STAT_ORDER_GT_0_CYCLES,
+	ALLOC_STAT_ORDER_GE_5_CNT,
+	ALLOC_STAT_ORDER_GE_5_CYCLES,
+	NR_ALLOC_ORDER_STATS
+};
+
+static DEFINE_PER_CPU_ALIGNED(unsigned long[NR_ALLOC_ORDER_STATS], alloc_order_stats_pcpu);
+
+static inline void alloc_stat_add(enum alloc_order_stats stat, unsigned long val)
+{
+	this_cpu_add(alloc_order_stats_pcpu[stat], val);
+}
+
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
 
@@ -5323,6 +5342,10 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
+	u64 t_start = 0;
+
+	if (order > 0)
+		t_start = arch_timer_read_counter();
 
 	/*
 	 * There are several places where we assume that the order value is sane
@@ -5374,6 +5397,18 @@ out:
 	}
 
 	trace_mm_page_alloc(page, order, alloc_mask, ac.migratetype);
+
+	if (order > 0 && page) {
+		u64 delta = arch_timer_read_counter() - t_start;
+
+		alloc_stat_add(ALLOC_STAT_ORDER_GT_0_CNT, 1);
+		alloc_stat_add(ALLOC_STAT_ORDER_GT_0_CYCLES, delta);
+
+		if (order >= 5) {
+			alloc_stat_add(ALLOC_STAT_ORDER_GE_5_CNT, 1);
+			alloc_stat_add(ALLOC_STAT_ORDER_GE_5_CYCLES, delta);
+		}
+	}
 
 	return page;
 }
@@ -9435,3 +9470,58 @@ bool has_managed_dma(void)
 	return false;
 }
 #endif /* CONFIG_ZONE_DMA */
+
+static int alloc_stats_proc_show(struct seq_file *m, void *v)
+{
+	unsigned long total[NR_ALLOC_ORDER_STATS] = {0};
+	int cpu, i;
+
+	for_each_possible_cpu(cpu) {
+		for (i = 0; i < NR_ALLOC_ORDER_STATS; i++) {
+			total[i] += per_cpu(alloc_order_stats_pcpu, cpu)[i];
+		}
+	}
+
+	seq_printf(m, "Read:       0 (RowClone: 0)\n");
+	seq_printf(m, "Write:      0 (RowClone: 0)\n");
+	seq_printf(m, "CoW:        0 (RowClone: 0)\n");
+	seq_printf(m, "Order > 0:  %lu (%lu cycles)\n",
+		   total[ALLOC_STAT_ORDER_GT_0_CNT],
+		   total[ALLOC_STAT_ORDER_GT_0_CYCLES]);
+	seq_printf(m, "Order >= 5: %lu (%lu cycles)\n",
+		   total[ALLOC_STAT_ORDER_GE_5_CNT],
+		   total[ALLOC_STAT_ORDER_GE_5_CYCLES]);
+
+	return 0;
+}
+
+static int alloc_stats_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, alloc_stats_proc_show, NULL);
+}
+
+static ssize_t alloc_stats_proc_write(struct file *file, const char __user *buffer,
+				      size_t count, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		memset(per_cpu(alloc_order_stats_pcpu, cpu), 0, sizeof(unsigned long) * NR_ALLOC_ORDER_STATS);
+	}
+	return count;
+}
+
+static const struct proc_ops alloc_stats_proc_ops = {
+	.proc_open    = alloc_stats_proc_open,
+	.proc_read    = seq_read,
+	.proc_write   = alloc_stats_proc_write,
+	.proc_lseek   = seq_lseek,
+	.proc_release = single_release,
+};
+
+static int __init alloc_stats_init_procfs(void)
+{
+	proc_create("rowclone_stats", 0666, NULL, &alloc_stats_proc_ops);
+	return 0;
+}
+subsys_initcall(alloc_stats_init_procfs);
