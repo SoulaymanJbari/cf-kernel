@@ -1157,6 +1157,8 @@ static unsigned int shrink_page_list(struct list_head *page_list,
 #ifdef CONFIG_ZONE_LAR
         if (sc->reclaim_idx == ZONE_LAR && page_zonenum(page) != ZONE_LAR)
             goto keep;
+		if (sc->reclaim_idx != ZONE_LAR && page_zonenum(page) == ZONE_LAR)
+			goto keep;
 #endif
 
 		if (!trylock_page(page))
