@@ -51,13 +51,15 @@ extern unsigned long lar_zone_start_pfn;
 
 #define RA_BITS				1
 #define BA_BITS				4
+#define CH_BITS				2
 #define ROW_IN_SA_BITS		9
-#define SA_IN_BANK_BITS		8
+#define SA_IN_BANK_BITS		6
 
 #if defined(CONFIG_LAR_MAP_ROBARACOCH)
 	#define RA_SHIFT_PA			(PAGE_SHIFT)
 	#define BA_SHIFT_PA			(RA_SHIFT_PA + RA_BITS)
-	#define ROW_IN_SA_SHIFT_PA 	(BA_SHIFT_PA + BA_BITS)
+	#define CH_SHIFT_PA			(BA_SHIFT_PA + BA_BITS)
+	#define ROW_IN_SA_SHIFT_PA 	(CH_SHIFT_PA + CH_BITS)
 	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
 	
 #elif defined(CONFIG_LAR_MAP_CHRABAROCO)
@@ -65,6 +67,7 @@ extern unsigned long lar_zone_start_pfn;
 	#define SA_IN_BANK_SHIFT_PA (ROW_IN_SA_SHIFT_PA + ROW_IN_SA_BITS)
 	#define BA_SHIFT_PA			(SA_IN_BANK_SHIFT_PA + SA_IN_BANK_BITS)
 	#define RA_SHIFT_PA			(BA_SHIFT_PA + BA_BITS)
+	#define CH_SHIFT_PA         (RA_SHIFT_PA + RA_BITS)
 #endif
 
 #define LAR_ZONE_ALIGN_PA	(1UL << SA_IN_BANK_SHIFT_PA)

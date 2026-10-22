@@ -16,8 +16,14 @@ static inline int lar_pfn_to_subarray_idx(unsigned long pfn)
 #if defined(CONFIG_LAR_MAP_ROBARACOCH)
 	unsigned int ra = (pa >> RA_SHIFT_PA) & ((1 << RA_BITS) - 1);
 	unsigned int ba = (pa >> BA_SHIFT_PA) & ((1 << BA_BITS) - 1);
+	unsigned int ch = (pa >> CH_SHIFT_PA) & ((1 << CH_BITS) - 1);
 	unsigned int sa_in_bank = (pa >> SA_IN_BANK_SHIFT_PA) & ((1 << SA_IN_BANK_BITS) - 1);
-	return (sa_in_bank << (BA_BITS + RA_BITS)) | (ba << RA_BITS) | ra;
+
+	/* Empilement sur 13 bits (0 à 8191) : SA(6) | CH(2) | BA(4) | RA(1) */
+	return (sa_in_bank << (CH_BITS + BA_BITS + RA_BITS)) |
+	       (ch << (BA_BITS + RA_BITS))                   |
+	       (ba << RA_BITS)                               |
+	       ra;
 #elif defined(CONFIG_LAR_MAP_CHRABAROCO)
 	return (int)(pa >> SA_IN_BANK_SHIFT_PA);
 #endif
@@ -33,14 +39,18 @@ static inline unsigned int lar_pfn_to_row_idx(unsigned long pfn)
 static inline unsigned long lar_sub_row_to_pfn(unsigned int sa_idx, unsigned int row_idx)
 {
 #if defined(CONFIG_LAR_MAP_ROBARACOCH)
+	/* Déballage des champs depuis sa_idx */
 	unsigned int ra = sa_idx & ((1 << RA_BITS) - 1);
-	unsigned ba = (sa_idx >> RA_BITS) & ((1 << BA_BITS) - 1);
-	unsigned int sa_in_bank = sa_idx >> (BA_BITS + RA_BITS);
+	unsigned int ba = (sa_idx >> RA_BITS) & ((1 << BA_BITS) - 1);
+	unsigned int ch = (sa_idx >> (RA_BITS + BA_BITS)) & ((1 << CH_BITS) - 1);
+	unsigned int sa_in_bank = sa_idx >> (RA_BITS + BA_BITS + CH_BITS);
 
+	/* Reconstruction de l'adresse physique avec les décalages mis à jour */
 	phys_addr_t pa = ((phys_addr_t)sa_in_bank << SA_IN_BANK_SHIFT_PA) |
-	                 ((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA)     |
-	                 ((phys_addr_t)ba << BA_SHIFT_PA)                 |
-	                 ((phys_addr_t)ra << RA_SHIFT_PA);
+	                 ((phys_addr_t)row_idx    << ROW_IN_SA_SHIFT_PA)  |
+	                 ((phys_addr_t)ch         << CH_SHIFT_PA)         |
+	                 ((phys_addr_t)ba         << BA_SHIFT_PA)         |
+	                 ((phys_addr_t)ra         << RA_SHIFT_PA);
 #elif defined(CONFIG_LAR_MAP_CHRABAROCO)
 	phys_addr_t pa = ((phys_addr_t)sa_idx << SA_IN_BANK_SHIFT_PA)     |
 	                 ((phys_addr_t)row_idx << ROW_IN_SA_SHIFT_PA);
