@@ -50,9 +50,9 @@ extern unsigned long lar_zone_start_pfn;
 #endif
 
 #define RA_BITS				1
-#define BA_BITS				4
+#define BA_BITS				5
 #define ROW_IN_SA_BITS		9
-#define SA_IN_BANK_BITS		8
+#define SA_IN_BANK_BITS		7
 
 #if defined(CONFIG_LAR_MAP_ROBARACOCH)
 	#define RA_SHIFT_PA			(PAGE_SHIFT)
