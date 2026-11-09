@@ -408,12 +408,32 @@ static int rowclone_ring_proc_show(struct seq_file *m, void *v)
         count = min_t(unsigned int, ring->head, RC_RING_SIZE);
         
         for (i = 0; i < count; i++) {
-            seq_printf(m, "%d 0x%lx 0x%lx\n",
+            struct rowclone_entry *e = &ring->entries[i];
+            seq_printf(m, "%d 0x%lx 0x%lx 0x%016lx %s\n",
                        cpu,
-                       ring->entries[i].src,
-                       ring->entries[i].dst);
+                       e->src,
+                       e->dst,
+                       e->ttbr0,
+                       e->comm);
         }
     }
+
+    {
+        struct task_struct *p;
+        seq_printf(m, "\n# === TTBR0 PROCESS MAP ===\n");
+        seq_printf(m, "# TTBR0_PHYS | COMM\n");
+        
+        rcu_read_lock();
+        for_each_process(p) {
+            struct mm_struct *mm = READ_ONCE(p->mm);
+            if (mm && mm->pgd) {
+                unsigned long ttbr0 = (unsigned long)virt_to_phys(mm->pgd);
+                seq_printf(m, "# MAP 0x%016lx %s\n", ttbr0, p->comm);
+            }
+        }
+        rcu_read_unlock();
+    }
+
     return 0;
 }
 

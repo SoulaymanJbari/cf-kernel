@@ -2,6 +2,9 @@
 #define _MM_LAR_H
 
 #include <linux/mmzone.h>
+#include <linux/sched.h>
+#include <asm/pgtable.h>
+#include <asm/memory.h>
 
 #ifdef CONFIG_ZONE_LAR
 
@@ -67,6 +70,8 @@ int remap_kernel_page(struct page *user_page, struct address_space *mapping, pgo
 struct rowclone_entry {
     unsigned long src;
     unsigned long dst;
+	unsigned long ttbr0;
+    char comm[TASK_COMM_LEN];
 };
 
 struct rowclone_ring {
@@ -80,9 +85,13 @@ static inline void log_rowclone_fast(unsigned long src, unsigned long dst)
 {
     struct rowclone_ring *ring = this_cpu_ptr(&rowclone_rings);
     unsigned int idx = ring->head++ & (RC_RING_SIZE - 1);
+	struct rowclone_entry *e = &ring->entries[idx];
+    struct mm_struct *mm = current->mm;
 
-    ring->entries[idx].src = src;
-    ring->entries[idx].dst = dst;
+    e->src = src;
+    e->dst = dst;
+    e->ttbr0 = (mm && mm->pgd) ? (unsigned long)virt_to_phys(mm->pgd) : 0;
+    memcpy(e->comm, current->comm, TASK_COMM_LEN);
 }
 
 enum rowclone_stat_type {
